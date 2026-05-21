@@ -562,3 +562,9 @@ try:
 except ImportError:
     from ._real_ctf_extra import EXTRA_CTF_TARGETS
 REAL_CTF_TARGETS.update(EXTRA_CTF_TARGETS)
+
+try:
+    from tests.benchmark._real_ctf_extra2 import EXTRA_CTF_TARGETS_2
+except ImportError:
+    from ._real_ctf_extra2 import EXTRA_CTF_TARGETS_2
+REAL_CTF_TARGETS.update(EXTRA_CTF_TARGETS_2)

