@@ -55,6 +55,7 @@ from .web_state_blackboard import (
     RouteStatus,
     EvidenceStrength,
 )
+from .knowledge_learner import KnowledgeLearner
 from .prompt_compiler import PromptCompiler, TokenBudget, build_task_context, compress_history, summarize_html
 from .route_cards import RouteCard, ROUTE_CARDS, get_route_card, get_routes_for_evidence
 from .source_audit_agent import SourceAuditAgent, AuditResult, SinkInfo, SourceInfo, DataFlow
@@ -131,6 +132,8 @@ __all__ = [
     "ParamRecord",
     "EvidenceStrength",
     "RouteStatus",
+    # Knowledge Learner (self-evolution)
+    "KnowledgeLearner",
     # M1: PromptCompiler
     "PromptCompiler",
     "TokenBudget",

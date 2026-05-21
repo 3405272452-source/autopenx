@@ -4127,6 +4127,7 @@ def run_route(
         "jwt", "graphql", "websocket", "xss",
         "lfi", "ssti", "sqli", "cmdi",
         "ssrf", "upload", "idor", "php_pop",
+        "xxe", "auth_logic",
     }
     if route in always_exploit_routes:
         found, flag = machine.run_exploit()
@@ -4248,3 +4249,14 @@ def run_route(
     )
     _sync_blackboard(blackboard, machine, result)
     return result
+
+# ---------------------------------------------------------------------------
+# Ensure new routes from routes/ package are registered
+# ---------------------------------------------------------------------------
+try:
+    from autopnex.ctf.routes.xxe import XXEMachine
+    from autopnex.ctf.routes.auth_logic import AuthLogicMachine
+    MACHINE_REGISTRY["xxe"] = XXEMachine
+    MACHINE_REGISTRY["auth_logic"] = AuthLogicMachine
+except ImportError:
+    pass

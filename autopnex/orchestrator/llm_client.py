@@ -1,6 +1,7 @@
 """Thin wrapper over the OpenAI SDK configured for DeepSeek."""
 from __future__ import annotations
 
+import os
 from typing import Any, Dict, List, Optional
 
 from config.settings import settings
@@ -104,3 +105,84 @@ class LLMClient:
         if reasoning_content:
             result["reasoning_content"] = reasoning_content
         return result
+
+
+# ---------------------------------------------------------------------------
+# MultiModelClient — manages multiple LLM providers for parallel worker diversity
+# ---------------------------------------------------------------------------
+
+
+class MultiModelClient:
+    """Manages multiple LLM providers for parallel worker diversity.
+
+    Discovers available providers from environment variables and rotates
+    workers across them. If only one provider (DeepSeek) is configured,
+    all workers use the same model — identical to current behavior.
+    """
+
+    def __init__(self) -> None:
+        self.providers: List[Dict[str, str]] = self._discover_providers()
+
+    def _discover_providers(self) -> List[Dict[str, str]]:
+        """Discover available LLM providers from environment."""
+        providers: List[Dict[str, str]] = []
+
+        # DeepSeek (primary)
+        if settings.deepseek_api_key:
+            providers.append({
+                "name": "deepseek",
+                "api_key": settings.deepseek_api_key,
+                "base_url": settings.deepseek_base_url,
+                "model": settings.deepseek_model,
+            })
+
+        # OpenAI (optional)
+        openai_key = os.environ.get("OPENAI_API_KEY", "").strip()
+        if openai_key:
+            providers.append({
+                "name": "openai",
+                "api_key": openai_key,
+                "base_url": os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1").strip(),
+                "model": os.environ.get("OPENAI_MODEL", "gpt-4o").strip(),
+            })
+
+        # Claude via OpenAI-compatible proxy (optional)
+        claude_key = os.environ.get("CLAUDE_API_KEY", "").strip()
+        if claude_key:
+            providers.append({
+                "name": "claude",
+                "api_key": claude_key,
+                "base_url": os.environ.get("CLAUDE_BASE_URL", "https://api.anthropic.com/v1").strip(),
+                "model": os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-20250514").strip(),
+            })
+
+        return providers
+
+    def get_client_for_worker(self, worker_index: int) -> LLMClient:
+        """Get an LLM client for a specific worker, rotating through providers.
+
+        Args:
+            worker_index: Zero-based index of the parallel worker.
+
+        Returns:
+            LLMClient configured for the provider assigned to this worker.
+            Falls back to default LLMClient if no providers are discovered.
+        """
+        if not self.providers:
+            return LLMClient()  # Fallback to default
+        provider = self.providers[worker_index % len(self.providers)]
+        return LLMClient(
+            api_key=provider["api_key"],
+            base_url=provider["base_url"],
+            model=provider["model"],
+        )
+
+    @property
+    def provider_count(self) -> int:
+        """Number of available LLM providers."""
+        return len(self.providers)
+
+    @property
+    def provider_names(self) -> List[str]:
+        """Names of all available providers."""
+        return [p["name"] for p in self.providers]

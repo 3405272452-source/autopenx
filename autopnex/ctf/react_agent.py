@@ -1285,22 +1285,24 @@ class CTFReActAgent:
 
         Each worker gets its own session and 5 iterations to find the flag.
         First worker to find a flag wins — others are cancelled.
+        Uses MultiModelClient for model diversity when multiple providers are configured.
         """
         import concurrent.futures
         import threading
 
-        from ..orchestrator.llm_client import LLMClient
+        from ..orchestrator.llm_client import MultiModelClient
 
         cancel_event = threading.Event()
         flag_pattern = re.compile(self.flag_format, re.IGNORECASE)
+        multi = MultiModelClient()
 
-        def worker(route: str) -> Optional[str]:
+        def worker(route: str, worker_index: int) -> Optional[str]:
             """Mini-agent worker focused on a single route."""
             if cancel_event.is_set():
                 return None
 
             try:
-                llm = LLMClient()
+                llm = multi.get_client_for_worker(worker_index)
                 if not llm.enabled:
                     return None
             except Exception:
@@ -1378,7 +1380,7 @@ class CTFReActAgent:
 
         # Launch workers in parallel
         with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-            futures = {executor.submit(worker, r): r for r in routes[:3]}
+            futures = {executor.submit(worker, r, idx): r for idx, r in enumerate(routes[:3])}
             try:
                 for future in concurrent.futures.as_completed(futures, timeout=60):
                     try:
@@ -1421,10 +1423,11 @@ class CTFReActAgent:
         import concurrent.futures
         import threading
 
-        from ..orchestrator.llm_client import LLMClient
+        from ..orchestrator.llm_client import MultiModelClient
 
         cancel_event = threading.Event()
         flag_pattern = re.compile(self.flag_format, re.IGNORECASE)
+        multi = MultiModelClient()
 
         def worker(direction_hint: str, worker_id: int) -> Optional[str]:
             """LLM worker focused on a specific attack direction."""
@@ -1432,7 +1435,7 @@ class CTFReActAgent:
                 return None
 
             try:
-                llm = LLMClient()
+                llm = multi.get_client_for_worker(worker_id)
                 if not llm.enabled:
                     return None
             except Exception:

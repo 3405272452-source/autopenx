@@ -106,6 +106,49 @@ def _run_agent(target, target_id: str, max_rounds: int = 15) -> Dict[str, Any]:
         except Exception:
             pass
 
+        # Extract winning route from action log if not found from state
+        if not result["winning_route"] and found and action_log:
+            # Look for the last exploit decision that led to success
+            for entry in reversed(action_log):
+                phase = entry.get("phase", "")
+                if phase == "exploit_decide":
+                    decision = entry.get("decision", {})
+                    route_val = decision.get("route", "")
+                    if route_val and route_val != "unknown":
+                        result["winning_route"] = route_val
+                        break
+                elif phase == "execute" and entry.get("agent") == "exploit":
+                    result_summary = str(entry.get("result_summary", ""))
+                    if "found_flag" in result_summary or "flag" in result_summary.lower():
+                        # Get route from the corresponding coordinate phase
+                        pass
+                elif phase == "process_result":
+                    outcome = entry.get("outcome", {})
+                    if outcome.get("stop") and outcome.get("flag"):
+                        # The winning route is in the preceding exploit_decide
+                        continue
+
+            # Second pass: look for route in exec_result
+            if not result["winning_route"]:
+                for entry in reversed(action_log):
+                    result_summary = str(entry.get("result_summary", ""))
+                    if "'found_flag': True" in result_summary or "'status': 'success'" in result_summary:
+                        # Extract route from result_summary
+                        import re as _re
+                        route_match = _re.search(r"'route':\s*'([^']+)'", result_summary)
+                        if route_match:
+                            result["winning_route"] = route_match.group(1)
+                            break
+
+        # Determine attribution: deterministic (state machine) vs llm_fallback
+        attribution = "deterministic"
+        if found and action_log:
+            for entry in reversed(action_log):
+                if entry.get("phase") == "llm_fallback":
+                    attribution = "llm_fallback"
+                    break
+        result["attribution"] = attribution
+
         # Dump debug snapshot on failure
         if not success:
             _dump_debug_snapshot(target_id, orch)

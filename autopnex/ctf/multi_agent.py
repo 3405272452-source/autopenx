@@ -120,6 +120,8 @@ class CoordinatorAgent(BaseAgent):
         "ssrf": 7,          # Deterministic file:// + metadata probes
         "php_pop": 7,       # Cookie/phar probes are cheap
         "idor": 7,          # Path-based id enumeration is cheap
+        "xxe": 6,           # XML entity injection
+        "auth_logic": 6,    # Cookie/header manipulation bypass
         "recon": 5,
     }
 
@@ -257,6 +259,7 @@ class CoordinatorAgent(BaseAgent):
                 "lfi", "ssti", "sqli", "cmdi", "jwt", "graphql",
                 "websocket", "xss", "upload",
                 "ssrf", "idor", "php_pop",
+                "xxe", "auth_logic",
             }
             if best_route in ALWAYS_EXPLOIT_ROUTES:
                 return AgentDecision(
@@ -573,6 +576,26 @@ class ReconAgent(BaseAgent):
         Also extracts parameters from HTML links/forms and checks for flags
         directly in responses.
         """
+        # Check knowledge base for matching patterns (self-evolution)
+        try:
+            from .knowledge_learner import KnowledgeLearner
+            learner = KnowledgeLearner()
+            match = learner.match_pattern(self.blackboard.state_summary())
+            if match:
+                # Add strong evidence for the matched route
+                self.blackboard.add_evidence(
+                    route=match["route"],
+                    score=0.95,
+                    source="knowledge_match",
+                    observation=f"Matched known pattern: {match.get('scenario', match['route'])}",
+                )
+                log.info(
+                    "Knowledge learner matched pattern: route=%s scenario=%s",
+                    match.get("route"), match.get("scenario"),
+                )
+        except Exception:
+            pass  # Knowledge learner is opt-in — never break recon
+
         findings = []
         for path in self.COMMON_PATHS:
             try:
@@ -817,6 +840,28 @@ class ReconAgent(BaseAgent):
                 source="recon_fingerprint",
                 detail="md5 reference in page — possible type juggling",
                 payload_family="md5_type_juggling",
+            )
+
+        # XXE: page mentions XML, has XML form, or Content-Type suggests XML
+        if "xml" in text_lower or "application/xml" in text_lower or "<xml" in text_lower:
+            self.blackboard.add_evidence(
+                route="xxe", score=0.90, source="recon_fingerprint",
+                observation="XML-related content detected (potential XXE)",
+            )
+
+        # Auth/Header: page mentions Referer, X-Forwarded-For, or "come from"
+        if any(kw in text_lower for kw in ["referer", "x-forwarded-for", "come from", "local", "127.0.0.1"]):
+            self.blackboard.add_evidence(
+                route="auth_logic", score=0.90, source="recon_fingerprint",
+                observation="Header manipulation hints detected",
+            )
+
+        # Auth/Header: page links to Secret.php or similar hidden auth pages
+        import re as _re
+        if _re.search(r'(?:secret|hidden|private)\.php', text_lower):
+            self.blackboard.add_evidence(
+                route="auth_logic", score=0.85, source="recon_fingerprint",
+                observation="Secret/hidden PHP page linked (likely header auth challenge)",
             )
 
     def _follow_interesting_links(self) -> Dict[str, Any]:
@@ -1887,7 +1932,80 @@ class MultiAgentOrchestrator:
         self.flag_format = flag_format
 
         # Run the collaboration loop
-        return self.run_loop(max_rounds=max_rounds)
+        found, flag, action_log = self.run_loop(max_rounds=max_rounds)
+
+        # Record success for self-evolution (knowledge learner)
+        if found and flag:
+            try:
+                from .knowledge_learner import KnowledgeLearner
+                learner = KnowledgeLearner()
+                # Determine winning route and scenario from action log
+                winning_route = self._extract_winning_route(action_log)
+                scenario = self._extract_scenario(action_log, winning_route)
+                learner.record_success(
+                    target_url=url,
+                    flag=flag,
+                    route=winning_route,
+                    scenario=scenario,
+                    action_log=action_log,
+                    blackboard_state=self.blackboard.state_summary(),
+                )
+            except Exception as exc:
+                log.debug("Knowledge learner record_success failed: %s", exc)
+
+        return found, flag, action_log
+
+    def _extract_winning_route(self, action_log: list) -> str:
+        """Extract the winning route from the action log."""
+        # Strategy: find the round that produced the flag, then get its route.
+        winning_round = None
+
+        # First pass: find the round where flag was found
+        for entry in reversed(action_log):
+            if entry.get("phase") == "process_result":
+                outcome = entry.get("outcome", {})
+                if outcome.get("stop") and outcome.get("flag"):
+                    winning_round = entry.get("round")
+                    break
+            if entry.get("phase") == "execute" and entry.get("agent") == "exploit":
+                summary = entry.get("result_summary", "")
+                if "flag" in summary.lower() or "success" in summary.lower():
+                    winning_round = entry.get("round")
+                    break
+
+        # Second pass: find the exploit_decide in the winning round
+        if winning_round is not None:
+            for entry in action_log:
+                if (entry.get("round") == winning_round
+                        and entry.get("phase") == "exploit_decide"):
+                    route = entry.get("decision", {}).get("route", "")
+                    if route:
+                        return route
+                # Also check coordinate phase for the route
+                if (entry.get("round") == winning_round
+                        and entry.get("phase") == "coordinate"):
+                    route = entry.get("decision", {}).get("route", "")
+                    if route and route not in ("recon", "flag_verify", "unblock"):
+                        return route
+
+        # Fallback: find the last exploit_decide entry
+        for entry in reversed(action_log):
+            if entry.get("phase") == "exploit_decide":
+                route = entry.get("decision", {}).get("route", "")
+                if route:
+                    return route
+
+        return "unknown"
+
+    def _extract_scenario(self, action_log: list, route: str) -> str:
+        """Extract the scenario name from the action log."""
+        for entry in reversed(action_log):
+            if entry.get("phase") in ("exploit_decide", "coordinate"):
+                decision = entry.get("decision", {})
+                hypothesis = decision.get("hypothesis", "")
+                if route in hypothesis:
+                    return hypothesis[:100]
+        return route
 
     def get_state_summary(self) -> Dict[str, Any]:
         """Get current state summary for diagnostics."""

