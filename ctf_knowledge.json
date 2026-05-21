@@ -74,6 +74,21 @@
       "steps_executed": 1,
       "duration_ms": 9869,
       "strategy_used": "GET /"
+    },
+    {
+      "timestamp": 1779334920.291237,
+      "challenge_type": "web",
+      "sub_type": "",
+      "tech_stack": [],
+      "potential_vulns": [],
+      "key_hints": [],
+      "difficulty_estimate": "medium",
+      "confidence": 0.5,
+      "flag": "flag{e80c9e6c-8991-4282-90d3-eae3f3c24837}",
+      "target": "http://9647e5fa-56b8-400a-9d0e-ace45d1f7211.node5.buuoj.cn:81",
+      "steps_executed": 5,
+      "duration_ms": 136266,
+      "strategy_used": "GET / → GET /check.php → GET /www.zip → GET /check.php?username=test&password=test → ctf_knowledge_search"
     }
   ],
   "attempt_records": [
@@ -641,6 +656,33 @@
       "lessons": [
         "Tools used: http_request",
         "Successful strategy: http_request"
+      ],
+      "blockers": []
+    },
+    {
+      "timestamp": 1779334920.291237,
+      "success": true,
+      "challenge_type": "web",
+      "sub_type": "",
+      "tech_stack": [],
+      "potential_vulns": [],
+      "key_hints": [],
+      "target": "http://9647e5fa-56b8-400a-9d0e-ace45d1f7211.node5.buuoj.cn:81",
+      "flag": "flag{e80c9e6c-8991-4282-90d3-eae3f3c24837}",
+      "error": null,
+      "steps_executed": 5,
+      "duration_ms": 136266,
+      "strategy_used": "GET / → GET /check.php → GET /www.zip → GET /check.php?username=test&password=test → ctf_knowledge_search",
+      "tools_used": [
+        "http_request",
+        "http_request",
+        "http_request",
+        "http_request",
+        "ctf_knowledge_search"
+      ],
+      "lessons": [
+        "Tools used: http_request -> http_request -> http_request -> http_request -> ctf_knowledge_search",
+        "Successful strategy: http_request -> http_request -> http_request -> http_request -> ctf_knowledge_search"
       ],
       "blockers": []
     }
