@@ -1,0 +1,572 @@
+{
+  "solve_records": [
+    {
+      "timestamp": 1779102046.2076557,
+      "challenge_type": "web",
+      "sub_type": "",
+      "tech_stack": [],
+      "potential_vulns": [],
+      "key_hints": [],
+      "difficulty_estimate": "medium",
+      "confidence": 0.5,
+      "flag": "flag{e80c9e6c-8991-4282-90d3-eae3f3c24837}",
+      "target": "http://49314923-9032-459e-8e80-9444a240b015.node5.buuoj.cn:81",
+      "steps_executed": 3,
+      "duration_ms": 111801,
+      "strategy_used": "GET / → python: import urllib.parse → POST /"
+    },
+    {
+      "timestamp": 1779102953.0915706,
+      "challenge_type": "web",
+      "sub_type": "",
+      "tech_stack": [],
+      "potential_vulns": [],
+      "key_hints": [],
+      "difficulty_estimate": "medium",
+      "confidence": 0.5,
+      "flag": "flag{e80c9e6c-8991-4282-90d3-eae3f3c24837}",
+      "target": "http://49314923-9032-459e-8e80-9444a240b015.node5.buuoj.cn:81",
+      "steps_executed": 2,
+      "duration_ms": 9035,
+      "strategy_used": "GET /49314923-9032-459e-8e80-9444a240b015.node5.buuoj.c → deterministic_php_pop"
+    },
+    {
+      "timestamp": 1779103547.7716856,
+      "challenge_type": "web",
+      "sub_type": "",
+      "tech_stack": [],
+      "potential_vulns": [],
+      "key_hints": [],
+      "difficulty_estimate": "medium",
+      "confidence": 0.5,
+      "flag": "flag{e80c9e6c-8991-4282-90d3-eae3f3c24837}",
+      "target": "http://49314923-9032-459e-8e80-9444a240b015.node5.buuoj.cn:81",
+      "steps_executed": 2,
+      "duration_ms": 9804,
+      "strategy_used": "GET / → deterministic_php_pop"
+    }
+  ],
+  "attempt_records": [
+    {
+      "timestamp": 1779097425.7723715,
+      "success": false,
+      "challenge_type": "web",
+      "sub_type": "source-assisted",
+      "tech_stack": [
+        "PHP",
+        "JavaScript"
+      ],
+      "potential_vulns": [
+        "pdo_connection_options",
+        "superglobal",
+        "session",
+        "pdo_fetch_mode",
+        "pdo_fetch_class_candidate",
+        "command_exec",
+        "php_magic_method",
+        "file_write",
+        "path_probe",
+        "file_read",
+        "file_delete",
+        "phar_trigger_candidate",
+        "php_set_file_read_gadget",
+        "base64"
+      ],
+      "key_hints": [
+        "tempdir/WEB附件/src.zip!/main.php:pdo_connection_options",
+        "tempdir/WEB附件/src.zip!/main.php:pdo_connection_options",
+        "tempdir/WEB附件/src.zip!/main.php:superglobal",
+        "tempdir/WEB附件/src.zip!/main.php:superglobal",
+        "tempdir/WEB附件/src.zip!/main.php:superglobal",
+        "tempdir/WEB附件/src.zip!/main.php:superglobal",
+        "tempdir/WEB附件/src.zip!/main.php:superglobal",
+        "tempdir/WEB附件/src.zip!/main.php:superglobal",
+        "tempdir/WEB附件/src.zip!/main.php:session",
+        "tempdir/WEB附件/src.zip!/main.php:session",
+        "tempdir/WEB附件/src.zip!/main.php:superglobal",
+        "tempdir/WEB附件/src.zip!/main.php:superglobal",
+        "tempdir/WEB附件/src.zip!/main.php:session",
+        "tempdir/WEB附件/src.zip!/main.php:session",
+        "tempdir/WEB附件/src.zip!/PDO_connect.php:pdo_connection_options",
+        "tempdir/WEB附件/src.zip!/PDO_connect.php:pdo_connection_options",
+        "tempdir/WEB附件/src.zip!/PDO_connect.php:pdo_connection_options",
+        "tempdir/WEB附件/src.zip!/PDO_connect.php:pdo_connection_options",
+        "tempdir/WEB附件/src.zip!/PDO_connect.php:pdo_fetch_mode",
+        "tempdir/WEB附件/src.zip!/PDO_connect.php:pdo_connection_options"
+      ],
+      "target": "http://7f7b2069-ea28-47de-88e3-e7fae3c242d8.node5.buuoj.cn:81",
+      "flag": null,
+      "error": "Max iterations reached without finding flag",
+      "steps_executed": 18,
+      "duration_ms": 420059,
+      "strategy_used": "phar_pdo_chain → GET /7f7b2069-ea28-47de-88e3-e7fae3c242d8.node5.buuoj.c → GET /robots.txt → GET /register.html → GET /main.php → GET /welcome.php → POST /main.php?action=register → file_analyze → ... (18 steps total)",
+      "tools_used": [
+        "phar_pdo_chain",
+        "http_request",
+        "http_request",
+        "http_request",
+        "http_request",
+        "http_request",
+        "http_request",
+        "file_analyze",
+        "run_python",
+        "http_request",
+        "http_request",
+        "run_python",
+        "run_python",
+        "http_request",
+        "run_python",
+        "http_request",
+        "ctf_knowledge_search",
+        "run_python"
+      ],
+      "lessons": [
+        "Tools used: phar_pdo_chain -> http_request -> http_request -> http_request -> http_request -> http_request -> http_request -> file_analyze -> run_python -> http_request -> http_request -> run_python",
+        "Blockers: Max iterations reached without finding flag"
+      ],
+      "blockers": [
+        "Max iterations reached without finding flag"
+      ]
+    },
+    {
+      "timestamp": 1779098815.9168978,
+      "success": false,
+      "challenge_type": "web",
+      "sub_type": "source-assisted",
+      "tech_stack": [
+        "PHP",
+        "JavaScript"
+      ],
+      "potential_vulns": [
+        "pdo_connection_options",
+        "superglobal",
+        "session",
+        "pdo_fetch_mode",
+        "pdo_fetch_class_candidate",
+        "command_exec",
+        "php_magic_method",
+        "file_write",
+        "path_probe",
+        "file_read",
+        "file_delete",
+        "phar_trigger_candidate",
+        "php_set_file_read_gadget",
+        "base64"
+      ],
+      "key_hints": [
+        "tempdir/WEB附件/src.zip!/main.php:pdo_connection_options",
+        "tempdir/WEB附件/src.zip!/main.php:pdo_connection_options",
+        "tempdir/WEB附件/src.zip!/main.php:superglobal",
+        "tempdir/WEB附件/src.zip!/main.php:superglobal",
+        "tempdir/WEB附件/src.zip!/main.php:superglobal",
+        "tempdir/WEB附件/src.zip!/main.php:superglobal",
+        "tempdir/WEB附件/src.zip!/main.php:superglobal",
+        "tempdir/WEB附件/src.zip!/main.php:superglobal",
+        "tempdir/WEB附件/src.zip!/main.php:session",
+        "tempdir/WEB附件/src.zip!/main.php:session",
+        "tempdir/WEB附件/src.zip!/main.php:superglobal",
+        "tempdir/WEB附件/src.zip!/main.php:superglobal",
+        "tempdir/WEB附件/src.zip!/main.php:session",
+        "tempdir/WEB附件/src.zip!/main.php:session",
+        "tempdir/WEB附件/src.zip!/PDO_connect.php:pdo_connection_options",
+        "tempdir/WEB附件/src.zip!/PDO_connect.php:pdo_connection_options",
+        "tempdir/WEB附件/src.zip!/PDO_connect.php:pdo_connection_options",
+        "tempdir/WEB附件/src.zip!/PDO_connect.php:pdo_connection_options",
+        "tempdir/WEB附件/src.zip!/PDO_connect.php:pdo_fetch_mode",
+        "tempdir/WEB附件/src.zip!/PDO_connect.php:pdo_connection_options"
+      ],
+      "target": "http://7f7b2069-ea28-47de-88e3-e7fae3c242d8.node5.buuoj.cn:81",
+      "flag": null,
+      "error": "Max iterations reached without finding flag",
+      "steps_executed": 8,
+      "duration_ms": 90962,
+      "strategy_used": "phar_pdo_chain → GET / → GET /register.html → GET /robots.txt → GET /main.php → POST /main.php?action=register → POST /main.php?action=register",
+      "tools_used": [
+        "phar_pdo_chain",
+        "http_request",
+        "http_request",
+        "http_request",
+        "http_request",
+        "http_request",
+        "http_request"
+      ],
+      "lessons": [
+        "Tools used: phar_pdo_chain -> http_request -> http_request -> http_request -> http_request -> http_request -> http_request",
+        "Blockers: Max iterations reached without finding flag"
+      ],
+      "blockers": [
+        "Max iterations reached without finding flag"
+      ]
+    },
+    {
+      "timestamp": 1779098996.3729322,
+      "success": false,
+      "challenge_type": "web",
+      "sub_type": "source-assisted",
+      "tech_stack": [
+        "PHP",
+        "JavaScript"
+      ],
+      "potential_vulns": [
+        "pdo_connection_options",
+        "superglobal",
+        "session",
+        "pdo_fetch_mode",
+        "pdo_fetch_class_candidate",
+        "command_exec",
+        "php_magic_method",
+        "file_write",
+        "path_probe",
+        "file_read",
+        "file_delete",
+        "phar_trigger_candidate",
+        "php_set_file_read_gadget",
+        "base64"
+      ],
+      "key_hints": [
+        "tempdir/WEB附件/src.zip!/main.php:pdo_connection_options",
+        "tempdir/WEB附件/src.zip!/main.php:pdo_connection_options",
+        "tempdir/WEB附件/src.zip!/main.php:superglobal",
+        "tempdir/WEB附件/src.zip!/main.php:superglobal",
+        "tempdir/WEB附件/src.zip!/main.php:superglobal",
+        "tempdir/WEB附件/src.zip!/main.php:superglobal",
+        "tempdir/WEB附件/src.zip!/main.php:superglobal",
+        "tempdir/WEB附件/src.zip!/main.php:superglobal",
+        "tempdir/WEB附件/src.zip!/main.php:session",
+        "tempdir/WEB附件/src.zip!/main.php:session",
+        "tempdir/WEB附件/src.zip!/main.php:superglobal",
+        "tempdir/WEB附件/src.zip!/main.php:superglobal",
+        "tempdir/WEB附件/src.zip!/main.php:session",
+        "tempdir/WEB附件/src.zip!/main.php:session",
+        "tempdir/WEB附件/src.zip!/PDO_connect.php:pdo_connection_options",
+        "tempdir/WEB附件/src.zip!/PDO_connect.php:pdo_connection_options",
+        "tempdir/WEB附件/src.zip!/PDO_connect.php:pdo_connection_options",
+        "tempdir/WEB附件/src.zip!/PDO_connect.php:pdo_connection_options",
+        "tempdir/WEB附件/src.zip!/PDO_connect.php:pdo_fetch_mode",
+        "tempdir/WEB附件/src.zip!/PDO_connect.php:pdo_connection_options"
+      ],
+      "target": "http://7f7b2069-ea28-47de-88e3-e7fae3c242d8.node5.buuoj.cn:81",
+      "flag": null,
+      "error": "Max iterations reached without finding flag",
+      "steps_executed": 11,
+      "duration_ms": 88819,
+      "strategy_used": "phar_pdo_chain → GET / → GET /register.html → GET /welcome.php → POST /main.php?action=register → POST /main.php?action=register → POST /main.php?action=login → GET /welcome.php → ... (11 steps total)",
+      "tools_used": [
+        "phar_pdo_chain",
+        "http_request",
+        "http_request",
+        "http_request",
+        "http_request",
+        "http_request",
+        "http_request",
+        "http_request",
+        "run_python",
+        "run_python",
+        "run_python"
+      ],
+      "lessons": [
+        "Tools used: phar_pdo_chain -> http_request -> http_request -> http_request -> http_request -> http_request -> http_request -> http_request -> run_python -> run_python -> run_python",
+        "Blockers: Max iterations reached without finding flag"
+      ],
+      "blockers": [
+        "Max iterations reached without finding flag"
+      ]
+    },
+    {
+      "timestamp": 1779099139.4315019,
+      "success": false,
+      "challenge_type": "web",
+      "sub_type": "source-assisted",
+      "tech_stack": [
+        "PHP",
+        "JavaScript"
+      ],
+      "potential_vulns": [
+        "pdo_connection_options",
+        "superglobal",
+        "session",
+        "pdo_fetch_mode",
+        "pdo_fetch_class_candidate",
+        "command_exec",
+        "php_magic_method",
+        "file_write",
+        "path_probe",
+        "file_read",
+        "file_delete",
+        "phar_trigger_candidate",
+        "php_set_file_read_gadget",
+        "base64"
+      ],
+      "key_hints": [
+        "tempdir/WEB附件/src.zip!/main.php:pdo_connection_options",
+        "tempdir/WEB附件/src.zip!/main.php:pdo_connection_options",
+        "tempdir/WEB附件/src.zip!/main.php:superglobal",
+        "tempdir/WEB附件/src.zip!/main.php:superglobal",
+        "tempdir/WEB附件/src.zip!/main.php:superglobal",
+        "tempdir/WEB附件/src.zip!/main.php:superglobal",
+        "tempdir/WEB附件/src.zip!/main.php:superglobal",
+        "tempdir/WEB附件/src.zip!/main.php:superglobal",
+        "tempdir/WEB附件/src.zip!/main.php:session",
+        "tempdir/WEB附件/src.zip!/main.php:session",
+        "tempdir/WEB附件/src.zip!/main.php:superglobal",
+        "tempdir/WEB附件/src.zip!/main.php:superglobal",
+        "tempdir/WEB附件/src.zip!/main.php:session",
+        "tempdir/WEB附件/src.zip!/main.php:session",
+        "tempdir/WEB附件/src.zip!/PDO_connect.php:pdo_connection_options",
+        "tempdir/WEB附件/src.zip!/PDO_connect.php:pdo_connection_options",
+        "tempdir/WEB附件/src.zip!/PDO_connect.php:pdo_connection_options",
+        "tempdir/WEB附件/src.zip!/PDO_connect.php:pdo_connection_options",
+        "tempdir/WEB附件/src.zip!/PDO_connect.php:pdo_fetch_mode",
+        "tempdir/WEB附件/src.zip!/PDO_connect.php:pdo_connection_options"
+      ],
+      "target": "http://7f7b2069-ea28-47de-88e3-e7fae3c242d8.node5.buuoj.cn:81",
+      "flag": null,
+      "error": "Max iterations reached without finding flag",
+      "steps_executed": 12,
+      "duration_ms": 78834,
+      "strategy_used": "phar_pdo_chain → ctf_mysql_helper → GET / → GET /robots.txt → GET /register.html → GET /welcome.php → POST /main.php?action=register → POST /main.php?action=register → ... (12 steps total)",
+      "tools_used": [
+        "phar_pdo_chain",
+        "ctf_mysql_helper",
+        "http_request",
+        "http_request",
+        "http_request",
+        "http_request",
+        "http_request",
+        "http_request",
+        "http_request",
+        "http_request",
+        "run_python",
+        "run_python"
+      ],
+      "lessons": [
+        "Tools used: phar_pdo_chain -> ctf_mysql_helper -> http_request -> http_request -> http_request -> http_request -> http_request -> http_request -> http_request -> http_request -> run_python -> run_python",
+        "Blockers: Max iterations reached without finding flag"
+      ],
+      "blockers": [
+        "Max iterations reached without finding flag"
+      ]
+    },
+    {
+      "timestamp": 1779101919.9457698,
+      "success": false,
+      "challenge_type": "web",
+      "sub_type": "",
+      "tech_stack": [],
+      "potential_vulns": [],
+      "key_hints": [],
+      "target": "http://49314923-9032-459e-8e80-9444a240b015.node5.buuoj.cn:81",
+      "flag": null,
+      "error": "Max iterations reached without finding flag",
+      "steps_executed": 8,
+      "duration_ms": 582702,
+      "strategy_used": "GET /49314923-9032-459e-8e80-9444a240b015.node5.buuoj.c → python: import requests → POST /49314923-9032-459e-8e80-9444a240b015.node5.buuoj.c → python: def php_string(s): → python: import requests → python: import requests → python: import requests → python: import requests",
+      "tools_used": [
+        "http_request",
+        "run_python",
+        "http_request",
+        "run_python",
+        "run_python",
+        "run_python",
+        "run_python",
+        "run_python"
+      ],
+      "lessons": [
+        "Tools used: http_request -> run_python -> http_request -> run_python -> run_python -> run_python -> run_python -> run_python",
+        "Blockers: Max iterations reached without finding flag"
+      ],
+      "blockers": [
+        "Max iterations reached without finding flag"
+      ]
+    },
+    {
+      "timestamp": 1779102046.2076557,
+      "success": true,
+      "challenge_type": "web",
+      "sub_type": "",
+      "tech_stack": [],
+      "potential_vulns": [],
+      "key_hints": [],
+      "target": "http://49314923-9032-459e-8e80-9444a240b015.node5.buuoj.cn:81",
+      "flag": "flag{e80c9e6c-8991-4282-90d3-eae3f3c24837}",
+      "error": null,
+      "steps_executed": 3,
+      "duration_ms": 111801,
+      "strategy_used": "GET / → python: import urllib.parse → POST /",
+      "tools_used": [
+        "http_request",
+        "run_python",
+        "http_request"
+      ],
+      "lessons": [
+        "Tools used: http_request -> run_python -> http_request",
+        "Successful strategy: http_request -> run_python -> http_request"
+      ],
+      "blockers": []
+    },
+    {
+      "timestamp": 1779102585.2518077,
+      "success": false,
+      "challenge_type": "web",
+      "sub_type": "",
+      "tech_stack": [],
+      "potential_vulns": [],
+      "key_hints": [],
+      "target": "http://49314923-9032-459e-8e80-9444a240b015.node5.buuoj.cn:81",
+      "flag": null,
+      "error": "Max iterations reached without finding flag",
+      "steps_executed": 8,
+      "duration_ms": 286723,
+      "strategy_used": "GET / → python: import urllib.parse → POST / → python: import urllib.parse → POST / → python: import requests → python: import requests → python: def php_private_prop(classname, propname, value):",
+      "tools_used": [
+        "http_request",
+        "run_python",
+        "http_request",
+        "run_python",
+        "http_request",
+        "run_python",
+        "run_python",
+        "run_python"
+      ],
+      "lessons": [
+        "Tools used: http_request -> run_python -> http_request -> run_python -> http_request -> run_python -> run_python -> run_python",
+        "Blockers: Max iterations reached without finding flag"
+      ],
+      "blockers": [
+        "Max iterations reached without finding flag"
+      ]
+    },
+    {
+      "timestamp": 1779102788.0096052,
+      "success": false,
+      "challenge_type": "web",
+      "sub_type": "",
+      "tech_stack": [],
+      "potential_vulns": [],
+      "key_hints": [],
+      "target": "http://49314923-9032-459e-8e80-9444a240b015.node5.buuoj.cn:81",
+      "flag": null,
+      "error": "Max iterations reached without finding flag",
+      "steps_executed": 1,
+      "duration_ms": 152020,
+      "strategy_used": "GET /",
+      "tools_used": [
+        "http_request"
+      ],
+      "lessons": [
+        "Tools used: http_request",
+        "Blockers: Max iterations reached without finding flag"
+      ],
+      "blockers": [
+        "Max iterations reached without finding flag"
+      ]
+    },
+    {
+      "timestamp": 1779102953.0915706,
+      "success": true,
+      "challenge_type": "web",
+      "sub_type": "",
+      "tech_stack": [],
+      "potential_vulns": [],
+      "key_hints": [],
+      "target": "http://49314923-9032-459e-8e80-9444a240b015.node5.buuoj.cn:81",
+      "flag": "flag{e80c9e6c-8991-4282-90d3-eae3f3c24837}",
+      "error": null,
+      "steps_executed": 2,
+      "duration_ms": 9035,
+      "strategy_used": "GET /49314923-9032-459e-8e80-9444a240b015.node5.buuoj.c → deterministic_php_pop",
+      "tools_used": [
+        "http_request",
+        "deterministic_php_pop"
+      ],
+      "lessons": [
+        "Tools used: http_request -> deterministic_php_pop",
+        "Successful strategy: http_request -> deterministic_php_pop"
+      ],
+      "blockers": []
+    },
+    {
+      "timestamp": 1779103547.7716856,
+      "success": true,
+      "challenge_type": "web",
+      "sub_type": "",
+      "tech_stack": [],
+      "potential_vulns": [],
+      "key_hints": [],
+      "target": "http://49314923-9032-459e-8e80-9444a240b015.node5.buuoj.cn:81",
+      "flag": "flag{e80c9e6c-8991-4282-90d3-eae3f3c24837}",
+      "error": null,
+      "steps_executed": 2,
+      "duration_ms": 9804,
+      "strategy_used": "GET / → deterministic_php_pop",
+      "tools_used": [
+        "http_request",
+        "deterministic_php_pop"
+      ],
+      "lessons": [
+        "Tools used: http_request -> deterministic_php_pop",
+        "Successful strategy: http_request -> deterministic_php_pop"
+      ],
+      "blockers": []
+    },
+    {
+      "timestamp": 1779206018.6314843,
+      "success": false,
+      "challenge_type": "web",
+      "sub_type": "",
+      "tech_stack": [],
+      "potential_vulns": [],
+      "key_hints": [],
+      "target": "http://60e6b32d-53cd-4b47-a8e6-059edf8da462.node5.buuoj.cn:81",
+      "flag": null,
+      "error": "Max iterations reached without finding flag",
+      "steps_executed": 3,
+      "duration_ms": 44440,
+      "strategy_used": "GET / → recon_scan",
+      "tools_used": [
+        "http_request",
+        "recon_scan"
+      ],
+      "lessons": [
+        "Tools used: http_request -> recon_scan",
+        "Blockers: Max iterations reached without finding flag"
+      ],
+      "blockers": [
+        "Max iterations reached without finding flag"
+      ]
+    },
+    {
+      "timestamp": 1779207681.8140347,
+      "success": false,
+      "challenge_type": "web",
+      "sub_type": "",
+      "tech_stack": [],
+      "potential_vulns": [],
+      "key_hints": [],
+      "target": "http://60e6b32d-53cd-4b47-a8e6-059edf8da462.node5.buuoj.cn:81",
+      "flag": null,
+      "error": "Timeout after 300s without finding flag",
+      "steps_executed": 9,
+      "duration_ms": 307114,
+      "strategy_used": "GET / → GET /robots.txt → recon_scan → GET /.git/HEAD → GET /flag → GET /login → GET /admin → GET /source → ... (9 steps total)",
+      "tools_used": [
+        "http_request",
+        "http_request",
+        "recon_scan",
+        "http_request",
+        "http_request",
+        "http_request",
+        "http_request",
+        "http_request",
+        "http_request"
+      ],
+      "lessons": [
+        "Tools used: http_request -> http_request -> recon_scan -> http_request -> http_request -> http_request -> http_request -> http_request -> http_request",
+        "Blockers: Timeout after 300s without finding flag"
+      ],
+      "blockers": [
+        "Timeout after 300s without finding flag"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,413 @@
+{
+  "web": [
+    {
+      "name": "SQL Injection",
+      "description": "Exploit SQL injection vulnerabilities to extract data or bypass authentication",
+      "steps": [
+        "Identify injection points (GET/POST parameters, headers, cookies)",
+        "Test for error-based injection with single quote",
+        "Determine database type from error messages",
+        "Use UNION-based or blind injection to extract data",
+        "Dump users/credentials table",
+        "Read flag file via LOAD_FILE or INTO OUTFILE"
+      ],
+      "success_rate": 0.75,
+      "tools": ["sqlmap", "manual_sqli"],
+      "indicators": ["sql error", "syntax error", "mysql", "postgresql", "sqlite"]
+    },
+    {
+      "name": "Server-Side Template Injection (SSTI)",
+      "description": "Exploit template engine injection to achieve RCE",
+      "steps": [
+        "Identify template injection points with {{7*7}} or ${7*7}",
+        "Determine template engine from response (49 vs 7777777)",
+        "Identify engine: Jinja2, Twig, Freemarker, Velocity, Mako",
+        "Use engine-specific payload to read /etc/passwd",
+        "Escalate to RCE via subprocess or os.popen",
+        "Read flag file"
+      ],
+      "success_rate": 0.80,
+      "tools": ["manual_ssti", "tplmap"],
+      "indicators": ["template", "jinja", "twig", "render", "{{", "${"]
+    },
+    {
+      "name": "Local File Inclusion (LFI)",
+      "description": "Read arbitrary files via path traversal or PHP wrappers",
+      "steps": [
+        "Identify file inclusion parameters (?page=, ?file=, ?include=)",
+        "Test path traversal with ../../../../etc/passwd",
+        "Try PHP wrappers: php://filter/convert.base64-encode/resource=",
+        "Read source code of application files",
+        "Look for credentials, config files, or flag",
+        "Escalate to RCE via log poisoning if possible"
+      ],
+      "success_rate": 0.70,
+      "tools": ["manual_lfi", "ffuf"],
+      "indicators": ["include", "require", "file", "page", "path", "php"]
+    },
+    {
+      "name": "Command Injection",
+      "description": "Execute arbitrary OS commands via injection",
+      "steps": [
+        "Identify parameters that may be passed to OS commands",
+        "Test with ; id or | id",
+        "Confirm execution via time-based blind (sleep 5)",
+        "Read /etc/passwd or flag file",
+        "Establish reverse shell if needed"
+      ],
+      "success_rate": 0.65,
+      "tools": ["manual_cmdi", "commix"],
+      "indicators": ["ping", "nslookup", "exec", "system", "shell", "cmd"]
+    },
+    {
+      "name": "Cross-Site Scripting (XSS)",
+      "description": "Inject malicious scripts to steal cookies or perform actions",
+      "steps": [
+        "Identify reflection points in the application",
+        "Test with <script>alert(1)</script>",
+        "Determine context (HTML, attribute, JavaScript)",
+        "Craft context-appropriate payload",
+        "Steal admin cookie or perform CSRF",
+        "Access admin panel to find flag"
+      ],
+      "success_rate": 0.60,
+      "tools": ["manual_xss", "xsstrike"],
+      "indicators": ["reflect", "input", "search", "comment", "user-controlled output"]
+    },
+    {
+      "name": "XXE Injection",
+      "description": "Exploit XML external entity processing to read files",
+      "steps": [
+        "Identify XML input points (file upload, API endpoints)",
+        "Test with basic XXE payload to read /etc/passwd",
+        "Try blind XXE with out-of-band data exfiltration",
+        "Read application source code or config files",
+        "Find flag in common locations"
+      ],
+      "success_rate": 0.65,
+      "tools": ["manual_xxe", "burpsuite"],
+      "indicators": ["xml", "soap", "docx", "xlsx", "svg", "application/xml"]
+    },
+    {
+      "name": "SSRF",
+      "description": "Make server perform requests to internal resources",
+      "steps": [
+        "Identify URL parameters that fetch remote resources",
+        "Test with http://127.0.0.1/ to confirm SSRF",
+        "Scan internal network for services",
+        "Access cloud metadata endpoint (169.254.169.254)",
+        "Access internal admin panels or APIs",
+        "Extract credentials or flag"
+      ],
+      "success_rate": 0.60,
+      "tools": ["manual_ssrf", "ssrfmap"],
+      "indicators": ["url", "fetch", "load", "import", "webhook", "callback"]
+    },
+    {
+      "name": "Authentication Bypass",
+      "description": "Bypass login or access controls",
+      "steps": [
+        "Test default credentials (admin/admin, admin/password)",
+        "Try SQL injection in login form",
+        "Check for JWT vulnerabilities (alg:none, weak secret)",
+        "Test for insecure direct object references",
+        "Check for cookie manipulation",
+        "Access admin area to find flag"
+      ],
+      "success_rate": 0.55,
+      "tools": ["manual_auth", "jwt_tool"],
+      "indicators": ["login", "jwt", "session", "cookie", "auth", "token"]
+    }
+  ],
+  "pwn": [
+    {
+      "name": "Buffer Overflow (Stack)",
+      "description": "Overflow stack buffer to control return address",
+      "steps": [
+        "Run checksec to identify protections (NX, PIE, canary, RELRO)",
+        "Find vulnerable function with gets/strcpy/scanf",
+        "Determine offset to return address with cyclic pattern",
+        "Check if NX is disabled (ret2shellcode) or enabled (ret2libc/ROP)",
+        "Build ROP chain or shellcode",
+        "Leak libc base if ASLR enabled",
+        "Call system('/bin/sh') or execve",
+        "Read flag from shell"
+      ],
+      "success_rate": 0.70,
+      "tools": ["pwntools", "gdb", "checksec", "ROPgadget"],
+      "indicators": ["gets", "strcpy", "scanf", "buffer", "overflow", "elf", "binary"]
+    },
+    {
+      "name": "Format String",
+      "description": "Exploit printf format string vulnerability",
+      "steps": [
+        "Identify printf(user_input) pattern",
+        "Leak stack values with %p.%p.%p",
+        "Find offset to control data with %n$p",
+        "Leak canary and return address",
+        "Overwrite GOT entry or return address with %n",
+        "Redirect execution to win function or shellcode"
+      ],
+      "success_rate": 0.65,
+      "tools": ["pwntools", "gdb", "pwndbg"],
+      "indicators": ["printf", "format", "sprintf", "fprintf", "%s", "%d"]
+    },
+    {
+      "name": "Heap Exploitation",
+      "description": "Exploit heap allocator vulnerabilities",
+      "steps": [
+        "Identify heap operations (malloc/free/realloc)",
+        "Find use-after-free, double-free, or heap overflow",
+        "Determine libc version for tcache/fastbin attacks",
+        "Leak heap and libc addresses",
+        "Overwrite __malloc_hook or __free_hook",
+        "Get shell and read flag"
+      ],
+      "success_rate": 0.50,
+      "tools": ["pwntools", "gdb", "pwndbg", "heapinspect"],
+      "indicators": ["malloc", "free", "heap", "chunk", "tcache", "fastbin"]
+    },
+    {
+      "name": "ret2libc",
+      "description": "Return to libc functions to bypass NX",
+      "steps": [
+        "Find buffer overflow vulnerability",
+        "Determine offset to return address",
+        "Find ROP gadgets (pop rdi; ret)",
+        "Leak libc address via puts/printf",
+        "Calculate libc base and system() address",
+        "Call system('/bin/sh')"
+      ],
+      "success_rate": 0.70,
+      "tools": ["pwntools", "ROPgadget", "one_gadget"],
+      "indicators": ["nx enabled", "no canary", "partial relro", "elf"]
+    }
+  ],
+  "crypto": [
+    {
+      "name": "RSA Small Exponent (e=3)",
+      "description": "Attack RSA with small public exponent",
+      "steps": [
+        "Extract n, e, c from challenge",
+        "Check if e is small (3, 5, 17, 65537)",
+        "If e=3 and m^3 < n, compute cube root of c",
+        "Try Hastad's broadcast attack if multiple ciphertexts",
+        "Use RsaCtfTool for automated attacks"
+      ],
+      "success_rate": 0.75,
+      "tools": ["RsaCtfTool", "python_crypto", "sage"],
+      "indicators": ["rsa", "n=", "e=3", "e=5", "public key", "modulus"]
+    },
+    {
+      "name": "RSA Common Modulus",
+      "description": "Attack RSA when same message encrypted with same n but different e",
+      "steps": [
+        "Identify two ciphertexts with same n but different e",
+        "Verify gcd(e1, e2) == 1",
+        "Use extended Euclidean algorithm to find a, b where a*e1 + b*e2 = 1",
+        "Compute m = c1^a * c2^b mod n"
+      ],
+      "success_rate": 0.80,
+      "tools": ["python_crypto", "sage"],
+      "indicators": ["same n", "two ciphertexts", "common modulus", "e1", "e2"]
+    },
+    {
+      "name": "Classical Cipher Analysis",
+      "description": "Break classical ciphers using frequency analysis",
+      "steps": [
+        "Identify cipher type (Caesar, Vigenere, Substitution, Rail Fence)",
+        "Perform frequency analysis on ciphertext",
+        "Try all 26 Caesar shifts",
+        "Use Kasiski test for Vigenere key length",
+        "Apply frequency analysis per key position",
+        "Decode and find flag"
+      ],
+      "success_rate": 0.85,
+      "tools": ["python_crypto", "quipqiup", "dcode.fr"],
+      "indicators": ["cipher", "encrypt", "shift", "key", "frequency", "classical"]
+    },
+    {
+      "name": "XOR Cipher",
+      "description": "Break XOR encryption with known/guessed key",
+      "steps": [
+        "Identify XOR-encrypted data (often hex or base64 encoded)",
+        "Try single-byte XOR with all 256 values",
+        "Use known plaintext (flag format) to recover key",
+        "Try repeating key XOR with Kasiski/IC analysis",
+        "Recover full key and decrypt"
+      ],
+      "success_rate": 0.80,
+      "tools": ["python_crypto", "xortool"],
+      "indicators": ["xor", "key", "encrypt", "hex", "bytes"]
+    },
+    {
+      "name": "Hash Cracking",
+      "description": "Crack hash values to recover plaintext",
+      "steps": [
+        "Identify hash type (MD5, SHA1, SHA256, bcrypt)",
+        "Try online hash databases (crackstation, hashes.org)",
+        "Use hashcat or john with wordlists",
+        "Try common CTF passwords and flag formats",
+        "Use rainbow tables for unsalted hashes"
+      ],
+      "success_rate": 0.60,
+      "tools": ["hashcat", "john", "python_hashlib"],
+      "indicators": ["hash", "md5", "sha", "digest", "password", "crack"]
+    }
+  ],
+  "misc": [
+    {
+      "name": "Steganography",
+      "description": "Extract hidden data from image/audio files",
+      "steps": [
+        "Check file metadata with exiftool",
+        "Run strings on the file",
+        "Try steghide with empty password",
+        "Use zsteg for PNG/BMP files",
+        "Check LSB steganography manually",
+        "Try stegsolve for visual analysis",
+        "Check for appended data after EOF"
+      ],
+      "success_rate": 0.65,
+      "tools": ["steghide", "zsteg", "exiftool", "stegsolve", "binwalk"],
+      "indicators": ["image", "png", "jpg", "bmp", "audio", "wav", "mp3", "hidden"]
+    },
+    {
+      "name": "File Forensics",
+      "description": "Analyze files for hidden content or embedded files",
+      "steps": [
+        "Run file command to identify true file type",
+        "Use binwalk to extract embedded files",
+        "Check file headers and magic bytes",
+        "Look for zip/rar archives appended to files",
+        "Analyze file structure with hex editor",
+        "Extract and analyze embedded content"
+      ],
+      "success_rate": 0.70,
+      "tools": ["binwalk", "foremost", "file", "xxd"],
+      "indicators": ["file", "binary", "extract", "embedded", "forensics", "carve"]
+    },
+    {
+      "name": "Network Traffic Analysis",
+      "description": "Analyze PCAP files for hidden data or credentials",
+      "steps": [
+        "Open PCAP in Wireshark",
+        "Filter by protocol (HTTP, FTP, SMTP, DNS)",
+        "Follow TCP/HTTP streams",
+        "Export HTTP objects",
+        "Look for credentials in cleartext protocols",
+        "Check DNS queries for data exfiltration",
+        "Reconstruct transferred files"
+      ],
+      "success_rate": 0.70,
+      "tools": ["wireshark", "tshark", "tcpdump"],
+      "indicators": ["pcap", "network", "traffic", "packet", "capture", "wireshark"]
+    },
+    {
+      "name": "ZIP/Archive Analysis",
+      "description": "Crack or bypass archive password protection",
+      "steps": [
+        "Check for pseudo-encryption (zip -e flag without real encryption)",
+        "Try common passwords (password, 123456, flag, ctf)",
+        "Use john or hashcat with zip2john",
+        "Check for plaintext attack if known file inside",
+        "Try zipgrep for content search",
+        "Extract and analyze contents"
+      ],
+      "success_rate": 0.60,
+      "tools": ["john", "hashcat", "7zip", "zipgrep"],
+      "indicators": ["zip", "rar", "7z", "archive", "password", "encrypted"]
+    },
+    {
+      "name": "Encoding/Decoding",
+      "description": "Decode various encoding schemes to find flag",
+      "steps": [
+        "Identify encoding type (Base64, Hex, Binary, Morse, etc.)",
+        "Try CyberChef magic detection",
+        "Decode layer by layer (multiple encodings)",
+        "Try common CTF encodings: Base32, Base58, Base85",
+        "Check for custom encoding schemes",
+        "Decode to find flag"
+      ],
+      "success_rate": 0.85,
+      "tools": ["cyberchef", "python", "dcode.fr"],
+      "indicators": ["base64", "hex", "binary", "morse", "encode", "decode", "cipher"]
+    }
+  ],
+  "reverse": [
+    {
+      "name": "Static Analysis",
+      "description": "Analyze binary without executing it",
+      "steps": [
+        "Run file and checksec on binary",
+        "Extract strings with strings command",
+        "Disassemble with objdump or radare2",
+        "Decompile with Ghidra or IDA",
+        "Identify main logic and flag checking function",
+        "Understand algorithm and reverse it",
+        "Compute correct input/flag"
+      ],
+      "success_rate": 0.65,
+      "tools": ["ghidra", "radare2", "objdump", "strings", "ida"],
+      "indicators": ["elf", "pe", "binary", "executable", "disassemble", "decompile"]
+    },
+    {
+      "name": "Dynamic Analysis",
+      "description": "Analyze binary behavior during execution",
+      "steps": [
+        "Run binary with strace/ltrace to trace syscalls/library calls",
+        "Use GDB to set breakpoints at key functions",
+        "Trace execution flow with pwndbg/peda",
+        "Identify flag comparison location",
+        "Patch binary or extract flag from memory",
+        "Use angr for symbolic execution if needed"
+      ],
+      "success_rate": 0.60,
+      "tools": ["gdb", "strace", "ltrace", "pwndbg", "angr"],
+      "indicators": ["strcmp", "memcmp", "check", "verify", "correct", "wrong"]
+    },
+    {
+      "name": "Constraint Solving (Z3/Angr)",
+      "description": "Use symbolic execution or SMT solver to find valid inputs",
+      "steps": [
+        "Identify input validation logic",
+        "Model constraints in Z3 or use angr symbolic execution",
+        "Define input variables and constraints",
+        "Solve for satisfying assignment",
+        "Verify solution against binary"
+      ],
+      "success_rate": 0.55,
+      "tools": ["z3", "angr", "python"],
+      "indicators": ["constraint", "check", "validate", "verify", "condition", "branch"]
+    },
+    {
+      "name": "Anti-Debug Bypass",
+      "description": "Bypass anti-debugging and anti-analysis techniques",
+      "steps": [
+        "Identify anti-debug checks (ptrace, IsDebuggerPresent, timing)",
+        "Patch binary to skip checks",
+        "Use LD_PRELOAD to hook ptrace",
+        "Set hardware breakpoints to avoid software detection",
+        "Use ScyllaHide plugin for transparent debugging"
+      ],
+      "success_rate": 0.50,
+      "tools": ["gdb", "x64dbg", "scyllahide", "patchelf"],
+      "indicators": ["ptrace", "debugger", "anti-debug", "timing", "obfuscation"]
+    },
+    {
+      "name": "Python Bytecode Reverse",
+      "description": "Reverse engineer Python bytecode or compiled scripts",
+      "steps": [
+        "Identify .pyc files or Python-compiled executables",
+        "Use uncompyle6 or decompile3 to decompile .pyc",
+        "For PyInstaller: use pyinstxtractor to extract",
+        "Analyze decompiled Python source",
+        "Understand flag generation logic",
+        "Reverse or brute-force the flag"
+      ],
+      "success_rate": 0.70,
+      "tools": ["uncompyle6", "pyinstxtractor", "dis", "python"],
+      "indicators": ["pyc", "python", "pyinstaller", "bytecode", ".py"]
+    }
+  ]
+}

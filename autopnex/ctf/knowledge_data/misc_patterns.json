@@ -1,0 +1,197 @@
+{
+  "category": "misc",
+  "description": "Misc题型常见解题模式与经验库（取证、隐写、流量分析等）",
+  "patterns": [
+    {
+      "id": "misc-file-analysis",
+      "name": "文件分析与提取",
+      "difficulty": "easy",
+      "indicators": ["未知文件", "损坏文件", "文件中嵌套文件", "magic bytes异常"],
+      "methodology": [
+        "1. file命令识别文件类型",
+        "2. binwalk扫描嵌入文件",
+        "3. strings提取可读字符串",
+        "4. hexdump/010Editor查看十六进制",
+        "5. 修复损坏的文件头"
+      ],
+      "tools": ["file", "binwalk", "foremost", "strings", "hexdump", "010Editor"],
+      "commands": {
+        "file": "file mystery_file",
+        "binwalk_scan": "binwalk mystery_file",
+        "binwalk_extract": "binwalk -e mystery_file",
+        "strings": "strings -n 8 mystery_file | grep -i flag",
+        "foremost": "foremost -i mystery_file -o output/"
+      },
+      "common_magic_bytes": {
+        "PNG": "89 50 4E 47 0D 0A 1A 0A",
+        "JPEG": "FF D8 FF",
+        "GIF": "47 49 46 38",
+        "ZIP": "50 4B 03 04",
+        "RAR": "52 61 72 21",
+        "PDF": "25 50 44 46",
+        "ELF": "7F 45 4C 46",
+        "GZIP": "1F 8B",
+        "7Z": "37 7A BC AF 27 1C",
+        "BMP": "42 4D"
+      }
+    },
+    {
+      "id": "misc-image-stego",
+      "name": "图片隐写术",
+      "difficulty": "medium",
+      "indicators": ["PNG/JPG/BMP图片", "图片看起来正常但有隐藏信息", "LSB", "通道分离"],
+      "methodology": [
+        "1. exiftool检查元数据（可能直接藏在注释中）",
+        "2. binwalk检查是否附加了其他文件",
+        "3. zsteg(PNG/BMP)检查LSB隐写",
+        "4. steghide(JPEG)提取隐藏数据",
+        "5. stegsolve查看各通道和位平面",
+        "6. 检查PNG的IDAT块、tEXt块等"
+      ],
+      "tools": ["exiftool", "zsteg", "steghide", "stegsolve", "Stegseek", "pngcheck"],
+      "commands": {
+        "exiftool": "exiftool image.png",
+        "zsteg": "zsteg image.png -a",
+        "steghide_extract": "steghide extract -sf image.jpg -p ''",
+        "steghide_info": "steghide info image.jpg",
+        "stegseek": "stegseek image.jpg wordlist.txt",
+        "pngcheck": "pngcheck -v image.png",
+        "identify": "identify -verbose image.png"
+      },
+      "techniques": [
+        "LSB隐写：最低有效位隐藏数据",
+        "Alpha通道隐写：利用透明度通道",
+        "调色板隐写：修改PNG调色板",
+        "IDAT块隐写：在PNG数据块中隐藏",
+        "EXIF隐写：在元数据中隐藏",
+        "图片尺寸修改：修改PNG的IHDR高度/宽度",
+        "盲水印：频域隐写"
+      ]
+    },
+    {
+      "id": "misc-audio-stego",
+      "name": "音频隐写术",
+      "difficulty": "medium",
+      "indicators": ["WAV/MP3音频文件", "频谱图", "摩尔斯电码", "DTMF"],
+      "methodology": [
+        "1. Audacity打开查看波形和频谱图",
+        "2. Sonic Visualiser查看频谱是否有隐藏图案",
+        "3. 检查是否是摩尔斯电码或DTMF拨号音",
+        "4. LSB音频隐写检测",
+        "5. DeepSound/OpenStego等工具提取"
+      ],
+      "tools": ["Audacity", "Sonic Visualiser", "multimon-ng", "DeepSound"],
+      "commands": {
+        "morse_decode": "使用在线工具或multimon-ng解码摩尔斯电码",
+        "dtmf_decode": "multimon-ng -t wav -a DTMF audio.wav",
+        "spectrogram": "sox audio.wav -n spectrogram -o spec.png"
+      }
+    },
+    {
+      "id": "misc-pcap-analysis",
+      "name": "流量分析 (PCAP)",
+      "difficulty": "medium",
+      "indicators": [".pcap/.pcapng文件", "网络流量", "HTTP/TCP/UDP通信"],
+      "methodology": [
+        "1. Wireshark打开，查看协议统计",
+        "2. 按协议过滤：HTTP、DNS、FTP、SMTP等",
+        "3. 追踪TCP流(Follow TCP Stream)",
+        "4. 导出HTTP对象(File→Export Objects→HTTP)",
+        "5. 检查DNS查询中的隐藏数据",
+        "6. 检查ICMP数据包中的隐藏信息"
+      ],
+      "tools": ["Wireshark", "tshark", "tcpdump", "NetworkMiner", "scapy"],
+      "commands": {
+        "tshark_http": "tshark -r capture.pcap -Y 'http' -T fields -e http.request.uri",
+        "tshark_dns": "tshark -r capture.pcap -Y 'dns' -T fields -e dns.qry.name",
+        "tshark_ftp": "tshark -r capture.pcap -Y 'ftp-data' -T fields -e data",
+        "extract_files": "tshark -r capture.pcap --export-objects http,exported_files/"
+      },
+      "common_protocols": {
+        "HTTP": "查看请求/响应内容，Cookie，POST数据",
+        "DNS": "检查TXT记录、子域名中的编码数据",
+        "FTP": "提取传输的文件",
+        "SMTP/IMAP": "提取邮件内容和附件",
+        "USB": "USB键盘/鼠标流量还原",
+        "ICMP": "检查data字段中的隐藏信息",
+        "WiFi": "WPA握手包破解"
+      }
+    },
+    {
+      "id": "misc-memory-forensics",
+      "name": "内存取证",
+      "difficulty": "hard",
+      "indicators": [".raw/.vmem/.dmp文件", "内存转储", "进程分析"],
+      "methodology": [
+        "1. volatility imageinfo确定操作系统profile",
+        "2. pslist/pstree查看进程列表",
+        "3. filescan扫描文件对象",
+        "4. dumpfiles提取文件",
+        "5. hashdump提取密码哈希",
+        "6. clipboard/notepad查看剪贴板和记事本内容",
+        "7. cmdscan/consoles查看命令历史"
+      ],
+      "tools": ["volatility2", "volatility3", "strings"],
+      "commands": {
+        "imageinfo": "vol.py -f memory.raw imageinfo",
+        "pslist": "vol.py -f memory.raw --profile=Win7SP1x64 pslist",
+        "filescan": "vol.py -f memory.raw --profile=Win7SP1x64 filescan | grep -i flag",
+        "dumpfiles": "vol.py -f memory.raw --profile=Win7SP1x64 dumpfiles -Q 0xoffset -D output/",
+        "hashdump": "vol.py -f memory.raw --profile=Win7SP1x64 hashdump",
+        "clipboard": "vol.py -f memory.raw --profile=Win7SP1x64 clipboard",
+        "cmdscan": "vol.py -f memory.raw --profile=Win7SP1x64 cmdscan",
+        "envars": "vol.py -f memory.raw --profile=Win7SP1x64 envars | grep -i flag"
+      }
+    },
+    {
+      "id": "misc-zip-analysis",
+      "name": "压缩包分析",
+      "difficulty": "easy",
+      "indicators": ["加密ZIP", "伪加密", "CRC32碰撞", "已知明文攻击"],
+      "methodology": [
+        "1. 检查是否为伪加密（修改标志位）",
+        "2. CRC32碰撞：如果文件很小，可以爆破内容",
+        "3. 已知明文攻击：如果知道压缩包中某个文件的内容",
+        "4. 字典/暴力破解密码",
+        "5. 检查注释字段"
+      ],
+      "tools": ["fcrackzip", "ARCHPR", "bkcrack", "zipinfo", "7z"],
+      "commands": {
+        "zipinfo": "zipinfo -v encrypted.zip",
+        "fcrackzip": "fcrackzip -b -c 'aA1' -l 1-6 encrypted.zip",
+        "bkcrack": "bkcrack -C encrypted.zip -c known_file.txt -p known_file.txt",
+        "john": "zip2john encrypted.zip > hash.txt && john hash.txt"
+      },
+      "pseudo_encryption": "ZIP伪加密：将加密标志位(offset 6-7)从00 00改为01 00即可，实际并未加密"
+    },
+    {
+      "id": "misc-usb-traffic",
+      "name": "USB流量还原",
+      "difficulty": "medium",
+      "indicators": ["USB协议", "HID设备", "键盘/鼠标流量"],
+      "methodology": [
+        "1. tshark提取USB数据",
+        "2. 根据设备类型（键盘/鼠标）解析数据",
+        "3. 键盘：将HID Usage ID映射为按键",
+        "4. 鼠标：提取坐标绘制轨迹"
+      ],
+      "commands": {
+        "extract_keyboard": "tshark -r usb.pcap -Y 'usb.capdata && usb.data_len == 8' -T fields -e usb.capdata",
+        "extract_mouse": "tshark -r usb.pcap -Y 'usb.capdata && usb.data_len == 4' -T fields -e usb.capdata"
+      }
+    },
+    {
+      "id": "misc-qrcode",
+      "name": "二维码分析",
+      "difficulty": "easy",
+      "indicators": ["QR码", "二维码", "条形码"],
+      "methodology": [
+        "1. 直接扫描解码",
+        "2. 如果损坏，尝试修复定位点",
+        "3. 如果是多个碎片，拼接后扫描",
+        "4. 检查是否有多层编码"
+      ],
+      "tools": ["zbarimg", "qrtools (Python)", "在线QR解码器"]
+    }
+  ]
+}

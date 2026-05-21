@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AutoPenX — 智能渗透测试控制台</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/style.css?v=3" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo">⚡</div>
+      <div>
+        <h1>AutoPenX</h1>
+        <p>LLM 驱动 · 多 Agent 协同 · 智能渗透测试</p>
+      </div>
+    </div>
+    <div id="health" class="badge badge-offline">连接中…</div>
+  </header>
+
+  <main>
+    <!-- ─── 1. Config (Collapsible) ─── -->
+    <section class="card">
+      <div class="card-header" id="config-toggle" onclick="toggleCard('config')">
+        <h2><span class="icon" style="background:rgba(59,130,246,0.15);color:var(--accent)">⚙</span> LLM 配置与外部工具 <span id="config-summary"></span></h2>
+        <span class="chevron" id="config-chevron">▼</span>
+      </div>
+      <!-- 不要写内联 display:none，否则会盖住 .card-body.open，导致折叠永不可见 -->
+      <div class="card-body" id="config-body">
+        <form id="settings-form">
+          <div class="form-grid">
+            <div class="form-group">
+              <span class="label">DeepSeek API Key</span>
+              <input type="password" id="api-key" placeholder="sk-..." autocomplete="off" />
+            </div>
+            <div class="form-group">
+              <span class="label">DEEPSEEK_BASE_URL</span>
+              <input type="text" id="base-url" placeholder="https://api.deepseek.com" />
+            </div>
+            <div class="form-group">
+              <span class="label">DEEPSEEK_MODEL</span>
+              <input type="text" id="model" placeholder="deepseek-chat" />
+            </div>
+            <div class="form-group">
+              <span class="label">Burp Proxy URL</span>
+              <input type="text" id="burp-proxy-url" placeholder="http://127.0.0.1:8080" />
+            </div>
+            <div class="form-group">
+              <span class="label">默认扫描模式</span>
+              <select id="settings-scan-mode">
+                <option value="passive">Passive（被动）</option>
+                <option value="active">Active（主动）</option>
+              </select>
+            </div>
+          </div>
+          <label class="checkbox-row"><input type="checkbox" id="clear-api-key" /> 清空已保存的 API Key</label>
+          <label class="checkbox-row"><input type="checkbox" id="settings-external-tools" /> 允许调用外部工具（nmap / sqlmap）</label>
+          <label class="checkbox-row"><input type="checkbox" id="settings-allow-local" /> 允许本地 / 内网目标</label>
+          <label class="checkbox-row"><input type="checkbox" id="settings-exploit-enabled" /> 允许 Exploit 执行</label>
+          <div class="actions">
+            <button type="submit" id="save-settings" class="btn btn-primary">保存配置</button>
+            <span id="settings-status" class="inline-note"></span>
+          </div>
+        </form>
+        <div class="subsection">
+          <h3>外部工具探测</h3>
+          <div id="capabilities" class="capability-list">
+            <span class="capability capability-missing"><strong>检测中…</strong></span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─── 2. Scan Launch ─── -->
+    <section class="card">
+      <div class="card-header open" onclick="toggleCard('scan')">
+        <h2><span class="icon" style="background:rgba(168,85,247,0.15);color:var(--purple)">🎯</span> 启动扫描</h2>
+        <span class="chevron" id="scan-chevron" style="transform:rotate(180deg)">▼</span>
+      </div>
+      <div class="card-body open" id="scan-body">
+        <form id="scan-form">
+          <div class="form-group">
+            <span class="label">目标 URL / 主机</span>
+            <div style="display:flex;gap:8px;align-items:center">
+              <input type="text" id="target" placeholder="http://testphp.vulnweb.com" required style="flex:1" />
+              <button type="button" id="scan-browser-login-btn" class="btn btn-secondary" onclick="window.browserLogin('scan')">🌐 浏览器登录</button>
+            </div>
+          </div>
+          <div class="form-grid">
+            <div class="form-group">
+              <span class="label">每阶段最大迭代</span>
+              <input type="number" id="max-iter" value="6" min="1" max="20" />
+            </div>
+            <div class="form-group">
+              <span class="label">扫描模式</span>
+              <select id="scan-mode">
+                <option value="passive">Passive</option>
+                <option value="active" selected>Active</option>
+              </select>
+            </div>
+          </div>
+          <label class="checkbox-row"><input type="checkbox" id="mock" /> 离线规则模式（--mock），不调用 LLM</label>
+          <label class="checkbox-row"><input type="checkbox" id="scan-external-tools" /> 允许外部工具（nmap / sqlmap）</label>
+          <label class="checkbox-row"><input type="checkbox" id="scan-allow-local" /> 允许本地 / 内网目标</label>
+          <label class="checkbox-row"><input type="checkbox" id="scan-exploit-enabled" /> 允许 Exploit 执行</label>
+          <div class="subsection">
+            <h3>授权范围</h3>
+            <div class="scope-grid">
+              <label class="scope-chip"><input type="checkbox" id="scope-passive" checked /> passive</label>
+              <label class="scope-chip"><input type="checkbox" id="scope-active" /> active_scan</label>
+              <label class="scope-chip"><input type="checkbox" id="scope-auth" /> auth_required</label>
+              <label class="scope-chip"><input type="checkbox" id="scope-exploit" /> exploit</label>
+            </div>
+            <div id="approval-status" class="inline-note" style="margin-top:8px">将按低权限策略执行</div>
+          </div>
+          <div class="actions">
+            <button type="submit" class="btn btn-scan">▶ 开始扫描</button>
+          </div>
+          <div class="warn-banner">⚠️ 仅限对授权目标测试，使用即表示已获得合法授权。</div>
+        </form>
+      </div>
+    </section>
+
+    <!-- ─── 3. CTF 模式 ─── -->
+    <section class="card">
+      <div class="card-header open" id="ctf-toggle" onclick="toggleCard('ctf')">
+        <h2><span class="icon" style="background:rgba(34,197,94,0.15);color:var(--green)">🏁</span> CTF 模式</h2>
+        <span class="chevron" id="ctf-chevron" style="transform:rotate(180deg)">▼</span>
+      </div>
+      <div class="card-body open" id="ctf-body">
+        <!-- File Upload -->
+        <div class="subsection">
+          <h3>📁 题目文件上传</h3>
+          <div id="ctf-dropzone" class="ctf-dropzone">
+            <p>拖拽文件到此处，或 <label for="ctf-file-input" class="ctf-upload-link">点击选择文件</label></p>
+            <p class="ctf-dropzone-hint">支持 .py, .c, .zip, .pcap, .png, .elf, .pdf 等</p>
+            <input type="file" id="ctf-file-input" multiple hidden />
+          </div>
+          <div id="ctf-file-list" class="ctf-file-list"></div>
+        </div>
+
+        <!-- Tool Selection -->
+        <div class="subsection">
+          <h3>🔧 工具选择</h3>
+          <div id="ctf-tools-panel" class="ctf-tools-panel">
+            <span class="inline-note">加载中…</span>
+          </div>
+        </div>
+
+        <!-- Configuration -->
+        <div class="subsection">
+          <h3>⚙ 配置</h3>
+          <div class="form-grid">
+            <div class="form-group">
+              <span class="label">目标地址</span>
+              <div style="display:flex;gap:8px;align-items:center">
+                <input type="text" id="ctf-target" placeholder="http://challenge.ctf.com 或 nc host port" style="flex:1" />
+                <button type="button" id="ctf-browser-login-btn" class="btn btn-secondary" onclick="window.browserLogin('ctf')">🌐 浏览器登录</button>
+              </div>
+            </div>
+            <div class="form-group">
+              <span class="label">题目类型</span>
+              <select id="ctf-challenge-type">
+                <option value="auto">自动检测</option>
+                <option value="web">Web</option>
+                <option value="pwn">Pwn</option>
+                <option value="crypto">Crypto</option>
+                <option value="misc">Misc</option>
+                <option value="reverse">Reverse</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <span class="label">Flag 格式</span>
+              <input type="text" id="ctf-flag-format" placeholder="flag{...}" value="flag{...}" />
+            </div>
+            <div class="form-group">
+              <span class="label">最大尝试次数: <strong id="ctf-attempts-val">10</strong></span>
+              <input type="range" id="ctf-max-attempts" min="1" max="20" value="10" oninput="document.getElementById('ctf-attempts-val').textContent=this.value" />
+            </div>
+            <div class="form-group">
+              <span class="label">超时时间: <strong id="ctf-timeout-val">600</strong>s</span>
+              <input type="range" id="ctf-timeout" min="60" max="1800" step="30" value="600" oninput="document.getElementById('ctf-timeout-val').textContent=this.value" />
+            </div>
+          </div>
+          <label class="checkbox-row"><input type="checkbox" id="ctf-thinking-mode" checked /> 启用 Thinking 模式（深度推理）</label>
+        </div>
+
+        <!-- Solve Button -->
+        <div class="actions">
+          <button type="button" id="ctf-solve-btn" class="btn btn-scan" onclick="window.startCTFSolve()">🏁 开始解题</button>
+        </div>
+
+        <!-- Results Area -->
+        <div id="ctf-results" class="ctf-results" hidden>
+          <div class="subsection">
+            <h3>📊 解题结果</h3>
+            <div id="ctf-progress-indicator" class="ctf-progress-indicator">
+              <div class="ctf-progress-bar"><div id="ctf-progress-fill" class="ctf-progress-fill"></div></div>
+              <span id="ctf-progress-text">等待开始…</span>
+            </div>
+            <div id="ctf-flag-result" class="ctf-flag-result" hidden></div>
+            <details id="ctf-thinking-section" class="ctf-thinking-section">
+              <summary>💭 推理过程</summary>
+              <pre id="ctf-thinking-content"></pre>
+            </details>
+            <div id="ctf-solve-log" class="ctf-solve-log"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─── 4. Live Progress ─── -->
+    <section class="card" id="progress-card" hidden>
+      <h2 style="padding:16px 22px 0;margin:0">实时进度 <span id="job-meta"></span></h2>
+      <div style="padding:0 22px 22px">
+        <div class="state-bar" style="margin-top:14px">
+          <span data-state="RECON">RECON</span>
+          <span data-state="SCAN">SCAN</span>
+          <span data-state="VULN_DETECT">VULN</span>
+          <span data-state="EXPLOIT">EXPLOIT</span>
+          <span data-state="REPORT">REPORT</span>
+          <span data-state="DONE">DONE</span>
+        </div>
+        <div class="telemetry-grid">
+          <div class="subpanel">
+            <h3>运行概况</h3>
+            <div id="telemetry-stats" class="kv-list"></div>
+          </div>
+          <div class="subpanel">
+            <h3>当前工具</h3>
+            <div id="current-tool" class="kv-list"><div class="kv-empty">等待执行…</div></div>
+          </div>
+        </div>
+        <div class="telemetry-grid">
+          <div class="subpanel">
+            <h3>阶段任务</h3>
+            <div id="phase-tasks" class="task-list"><div class="kv-empty">等待规划…</div></div>
+          </div>
+          <div class="subpanel">
+            <h3>证据产物</h3>
+            <div id="artifact-list" class="artifact-list"><div class="kv-empty">尚无产物</div></div>
+          </div>
+        </div>
+        <div class="subpanel llm-panel">
+          <h3>LLM 对话</h3>
+          <div id="llm-chat" class="llm-chat-log"><div class="kv-empty">等待 LLM 响应…</div></div>
+        </div>
+        <pre id="log"></pre>
+      </div>
+    </section>
+
+    <!-- ─── 5. Findings ─── -->
+    <section class="card" id="findings-card" hidden>
+      <h2 style="padding:16px 22px 0;margin:0">漏洞发现</h2>
+      <div style="padding:0 22px 22px;overflow-x:auto">
+        <table id="findings-table">
+          <thead>
+            <tr><th>#</th><th>严重度</th><th>状态</th><th>类型</th><th>URL</th><th>参数</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ─── 6. Report ─── -->
+    <section class="card" id="report-card" hidden>
+      <h2 style="padding:16px 22px 0;margin:0">完整报告</h2>
+      <div style="padding:0 22px 22px">
+        <div id="report-actions">
+          <a id="md-link" href="#" target="_blank">📄 Markdown</a>
+          <a id="html-link" href="#" target="_blank">🌐 HTML</a>
+        </div>
+        <iframe id="report-frame"></iframe>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/app.js?v=4"></script>
+</body>
+</html>

@@ -1,0 +1,145 @@
+{
+  "category": "reverse",
+  "description": "Reverse题型常见解题模式与经验库",
+  "patterns": [
+    {
+      "id": "rev-static-analysis",
+      "name": "静态分析基础流程",
+      "difficulty": "easy",
+      "indicators": ["ELF/PE二进制", "需要逆向算法", "输入验证程序"],
+      "methodology": [
+        "1. file命令确认文件类型和架构",
+        "2. strings提取字符串（可能直接包含flag或提示）",
+        "3. IDA/Ghidra反编译查看伪代码",
+        "4. 定位main函数和关键比较逻辑",
+        "5. 分析加密/验证算法",
+        "6. 编写逆向脚本还原flag"
+      ],
+      "tools": ["IDA Pro", "Ghidra", "Binary Ninja", "radare2", "Cutter"],
+      "commands": {
+        "file": "file binary",
+        "strings": "strings binary | grep -i flag",
+        "ltrace": "ltrace ./binary",
+        "strace": "strace ./binary",
+        "objdump": "objdump -d binary | less",
+        "readelf": "readelf -a binary"
+      }
+    },
+    {
+      "id": "rev-dynamic-analysis",
+      "name": "动态调试分析",
+      "difficulty": "medium",
+      "indicators": ["反调试", "运行时解密", "自修改代码", "需要观察运行时行为"],
+      "methodology": [
+        "1. GDB加载程序，设置断点",
+        "2. 在关键比较处下断点观察寄存器值",
+        "3. 使用ltrace/strace跟踪系统调用和库函数调用",
+        "4. 绕过反调试（patch ptrace检测等）",
+        "5. dump运行时解密的数据"
+      ],
+      "tools": ["gdb+pwndbg", "gdb+peda", "x64dbg (Windows)", "OllyDbg"],
+      "gdb_commands": {
+        "break_main": "b main",
+        "break_strcmp": "b strcmp",
+        "run_with_input": "r <<< 'test_input'",
+        "examine_string": "x/s $rdi",
+        "examine_memory": "x/20wx $rsp",
+        "set_register": "set $rax = 1",
+        "patch_byte": "set *(char*)0x401234 = 0x90"
+      }
+    },
+    {
+      "id": "rev-z3-constraint",
+      "name": "Z3约束求解",
+      "difficulty": "medium",
+      "indicators": ["复杂数学运算", "多个条件约束", "输入验证有多个check", "非线性变换"],
+      "methodology": [
+        "1. 分析验证逻辑，提取所有约束条件",
+        "2. 将约束转化为Z3表达式",
+        "3. 求解满足所有约束的输入",
+        "4. 输入即为flag"
+      ],
+      "tools": ["z3-solver (Python)", "angr"],
+      "script_template": "from z3 import *\n\n# 创建符号变量\nflag = [BitVec(f'flag_{i}', 8) for i in range(flag_len)]\n\ns = Solver()\n\n# 添加可打印字符约束\nfor c in flag:\n    s.add(c >= 0x20, c <= 0x7e)\n\n# 添加前缀约束 flag{\nfor i, c in enumerate(b'flag{'):\n    s.add(flag[i] == c)\ns.add(flag[-1] == ord('}'))\n\n# 添加程序中的验证约束\n# s.add(flag[5] + flag[6] == 0xAB)\n# s.add(flag[7] ^ flag[8] == 0x12)\n# ...\n\nif s.check() == sat:\n    m = s.model()\n    result = ''.join(chr(m[c].as_long()) for c in flag)\n    print(f'Flag: {result}')"
+    },
+    {
+      "id": "rev-angr-symbolic",
+      "name": "angr符号执行",
+      "difficulty": "medium",
+      "indicators": ["路径爆炸可控", "有明确的成功/失败输出", "输入长度已知"],
+      "methodology": [
+        "1. 确定成功路径的地址（如打印'Correct'的地址）",
+        "2. 确定失败路径的地址（如打印'Wrong'的地址）",
+        "3. 使用angr的explore功能自动求解",
+        "4. 从找到的状态中提取输入"
+      ],
+      "tools": ["angr"],
+      "script_template": "import angr\nimport claripy\n\np = angr.Project('./binary', auto_load_libs=False)\n\n# 方法1: 从入口点开始\nstate = p.factory.entry_state()\n\n# 方法2: 从特定地址开始（跳过输入读取）\n# flag_len = 32\n# flag = claripy.BVS('flag', flag_len * 8)\n# state = p.factory.blank_state(addr=0x401100)\n# state.memory.store(flag_addr, flag)\n\nsm = p.factory.simulation_manager(state)\n\n# explore: 找到到达find地址的路径，避开avoid地址\nsm.explore(\n    find=0x401234,   # 'Correct!'的地址\n    avoid=0x401256   # 'Wrong!'的地址\n)\n\nif sm.found:\n    found_state = sm.found[0]\n    # 提取输入\n    print(found_state.posix.dumps(0))  # stdin的内容"
+    },
+    {
+      "id": "rev-xor-encryption",
+      "name": "XOR加密逆向",
+      "difficulty": "easy",
+      "indicators": ["XOR操作", "简单加密", "密钥循环使用"],
+      "methodology": [
+        "1. 识别XOR加密逻辑",
+        "2. 如果密钥已知，直接XOR解密",
+        "3. 如果密钥未知但知道明文前缀(如'flag{')，用已知明文推导密钥",
+        "4. 如果是单字节XOR，遍历0-255"
+      ],
+      "script_template": "# 已知密钥XOR解密\nencrypted = bytes.fromhex('...')\nkey = b'secret_key'\nresult = bytes([encrypted[i] ^ key[i % len(key)] for i in range(len(encrypted))])\nprint(result)\n\n# 已知明文推导密钥\nencrypted = bytes.fromhex('...')\nknown_prefix = b'flag{'\nkey_fragment = bytes([encrypted[i] ^ known_prefix[i] for i in range(len(known_prefix))])\nprint(f'Key fragment: {key_fragment}')"
+    },
+    {
+      "id": "rev-anti-debug",
+      "name": "反调试绕过",
+      "difficulty": "medium",
+      "indicators": ["ptrace检测", "IsDebuggerPresent", "时间检测", "int3检测"],
+      "methodology": [
+        "1. 识别反调试技术类型",
+        "2. patch掉反调试检查（NOP或修改跳转）",
+        "3. 或使用LD_PRELOAD hook相关函数",
+        "4. 或在GDB中手动修改返回值"
+      ],
+      "tools": ["gdb", "radare2", "IDA Pro", "x64dbg"],
+      "bypass_techniques": {
+        "ptrace": "patch ptrace调用为NOP，或LD_PRELOAD fake ptrace",
+        "IsDebuggerPresent": "patch为xor eax,eax; ret",
+        "time_check": "patch时间比较的跳转指令",
+        "self_debug": "先attach再detach"
+      }
+    },
+    {
+      "id": "rev-maze",
+      "name": "迷宫类逆向",
+      "difficulty": "easy",
+      "indicators": ["方向输入(wasd/上下左右)", "地图数据", "路径验证"],
+      "methodology": [
+        "1. 提取地图数据（通常是二维数组）",
+        "2. 找到起点和终点",
+        "3. BFS/DFS求解最短路径",
+        "4. 将路径转换为输入序列"
+      ],
+      "tools": ["IDA Pro", "Ghidra", "Python BFS/DFS"]
+    },
+    {
+      "id": "rev-vm",
+      "name": "虚拟机逆向",
+      "difficulty": "hard",
+      "indicators": ["自定义指令集", "opcode dispatch", "switch-case大量分支", "字节码解释器"],
+      "methodology": [
+        "1. 识别VM的指令集（opcode→handler映射）",
+        "2. 分析每个handler的功能",
+        "3. 反汇编字节码为可读指令",
+        "4. 理解程序逻辑后逆向求解"
+      ],
+      "tools": ["IDA Pro", "Ghidra", "Binary Ninja", "Python 反汇编脚本"]
+    }
+  ],
+  "common_patterns_to_recognize": {
+    "base64_table": "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/",
+    "rc4_init": "for i in range(256): S[i] = i  # KSA初始化",
+    "tea_constants": "0x9E3779B9 (TEA/XTEA的delta常量)",
+    "md5_init": "0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476",
+    "sha256_init": "0x6A09E667, 0xBB67AE85, 0x3C6EF372, 0xA54FF53A"
+  }
+}

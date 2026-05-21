@@ -1,0 +1,62 @@
+{
+  "web_skills": [
+    "**PRIORITY**: Check source code leaks FIRST: /www.zip, /www.tar.gz, /web.zip, /source.zip, /backup.zip, /app.zip, /dist.zip, /code.zip. Source code is the #1 key to Web CTF.",
+    "Check /robots.txt, /.git/HEAD, /.svn/entries, /src, /source, /backup for information disclosure",
+    "Look for HTML comments containing hints (<!-- -->)",
+    "Identify the framework from response headers (X-Powered-By) and page content, then try framework-specific routes",
+    "For Laminas/Zend Framework: try /album, /application, /user, /module. Check for custom actions like /album/imgupload, /album/imgdelete",
+    "For PHP apps with unlink()/file_exists()/is_file() on user input: this is a phar:// deserialization trigger. Build POP chain, generate phar, gzip compress, rename to .jpg, upload, trigger via phar:// on the vulnerable endpoint",
+    "Laminas POP chain for RCE: Logger→Writer\\Mail→PhpRenderer→TemplateMapResolver (setBody→system). Use eventsToMail for command.",
+    "Test SQL injection on all input parameters: ' OR 1=1--, UNION SELECT",
+    "Check for SSTI: {{7*7}}, ${7*7}, try Jinja2/Twig/Mako payloads",
+    "For Flask apps: check /console (Werkzeug debugger), /src, /source",
+    "For PHP: try php://filter/convert.base64-encode/resource=index.php",
+    "Pickle deserialization: use subprocess.check_output for RCE, avoid WAF keywords",
+    "File upload bypass: change Content-Type, use double extensions (.php.jpg), gzip+rename for phar",
+    "JWT attacks: try none algorithm, weak secret brute force",
+    "SSRF: try http://127.0.0.1, http://localhost, cloud metadata endpoints",
+    "When source code is available, analyze it for: unserialize() calls, file operations on user input, eval/system/exec calls, SQL query construction, template rendering with user data"
+  ],
+  "crypto_skills": [
+    "RSA small e (e=3): if m^e < n, just take e-th root of c",
+    "RSA close primes: use Fermat factorization when |p-q| is small",
+    "RSA Wiener attack: when d < n^(1/4)/3, use continued fractions",
+    "Common modulus attack: same n, different e values, use extended GCD",
+    "XOR: if key is short, use frequency analysis or known plaintext",
+    "Base64 → Hex → ASCII: try multi-layer decoding",
+    "Caesar/ROT13: try all 26 shifts, look for flag{} pattern",
+    "AES ECB: detect repeated blocks, use cut-and-paste attack"
+  ],
+  "misc_skills": [
+    "binwalk -e for embedded files in images",
+    "Check EXIF data with exiftool for hidden messages",
+    "PNG: check for modified IHDR (wrong dimensions), trailing data after IEND",
+    "ZIP pseudo-encryption: flip encryption flag in central directory",
+    "pcap: filter by protocol, follow TCP streams, extract files",
+    "Steganography: LSB in PNG (zsteg), DCT in JPEG (steghide)",
+    "Morse code: dots and dashes separated by spaces"
+  ],
+  "pwn_skills": [
+    "checksec first: check NX, PIE, Canary, RELRO",
+    "Buffer overflow: find offset with cyclic pattern, overwrite return address",
+    "Format string: %p to leak stack, %n to write, %hhn for byte-by-byte",
+    "ROP: pop rdi; ret for first arg, ret for stack alignment on x64",
+    "ret2libc: leak libc address via puts@plt, calculate system offset"
+  ],
+  "reverse_skills": [
+    "strings command first: look for flag patterns, URLs, passwords",
+    "Check for UPX packing: upx -d to unpack",
+    "XOR encryption: find key array, reverse the operation",
+    "z3 solver for constraint-based challenges",
+    "ltrace/strace to see library/system calls at runtime"
+  ],
+  "general_tips": [
+    "Always check page source (HTML comments often contain hints)",
+    "Try common paths: /flag, /flag.txt, /admin, /login, /src, /source, /robots.txt",
+    "Look at HTTP response headers for clues (Server, X-Powered-By)",
+    "If you find source code, analyze it carefully for vulnerabilities",
+    "For Python/Flask apps: look for pickle, eval, exec, os.system usage",
+    "WAF bypass: try encoding (URL, double URL, unicode), case mixing, comments",
+    "When stuck: re-read the challenge description for missed hints"
+  ]
+}

@@ -1,0 +1,104 @@
+{
+  "description": "CTF解题工具速查表 - AI必须优先查阅此表选择工具",
+  "tool_categories": {
+    "reconnaissance": {
+      "nmap": {"usage": "nmap -sV -sC -p- target", "purpose": "端口扫描和服务识别"},
+      "dirsearch": {"usage": "dirsearch -u http://target -e php,html,txt", "purpose": "目录和文件枚举"},
+      "gobuster": {"usage": "gobuster dir -u http://target -w wordlist.txt", "purpose": "目录爆破"},
+      "nikto": {"usage": "nikto -h http://target", "purpose": "Web漏洞扫描"},
+      "whatweb": {"usage": "whatweb http://target", "purpose": "Web技术栈识别"},
+      "wappalyzer": {"usage": "浏览器插件", "purpose": "技术栈识别"}
+    },
+    "web_exploitation": {
+      "sqlmap": {"usage": "sqlmap -u 'http://target?id=1' --dbs --batch", "purpose": "SQL注入自动化"},
+      "burpsuite": {"usage": "代理拦截和修改请求", "purpose": "Web请求分析和修改"},
+      "tplmap": {"usage": "tplmap -u 'http://target?name=test'", "purpose": "SSTI自动化检测"},
+      "jwt_tool": {"usage": "jwt_tool <token> -T", "purpose": "JWT分析和攻击"},
+      "ssrfmap": {"usage": "ssrfmap -r request.txt -p url", "purpose": "SSRF利用"},
+      "ysoserial": {"usage": "java -jar ysoserial.jar CommonsCollections1 'cmd'", "purpose": "Java反序列化payload生成"}
+    },
+    "binary_exploitation": {
+      "pwntools": {"usage": "from pwn import *", "purpose": "Python二进制利用框架"},
+      "gdb_pwndbg": {"usage": "gdb ./binary → pwndbg命令", "purpose": "动态调试"},
+      "checksec": {"usage": "checksec ./binary", "purpose": "检查二进制保护机制"},
+      "ROPgadget": {"usage": "ROPgadget --binary ./binary", "purpose": "ROP gadget搜索"},
+      "one_gadget": {"usage": "one_gadget ./libc.so.6", "purpose": "一键getshell gadget"},
+      "ropper": {"usage": "ropper -f ./binary", "purpose": "ROP gadget搜索"},
+      "patchelf": {"usage": "patchelf --set-interpreter ld.so ./binary", "purpose": "修改ELF动态链接器"}
+    },
+    "cryptography": {
+      "RsaCtfTool": {"usage": "python3 RsaCtfTool.py -n N -e E --uncipher C", "purpose": "RSA攻击自动化"},
+      "z3_solver": {"usage": "from z3 import *", "purpose": "约束求解"},
+      "sage": {"usage": "sage script.sage", "purpose": "数学计算(大整数、椭圆曲线等)"},
+      "hashcat": {"usage": "hashcat -m 0 hash.txt wordlist.txt", "purpose": "哈希破解"},
+      "john": {"usage": "john --wordlist=rockyou.txt hash.txt", "purpose": "密码破解"},
+      "CyberChef": {"usage": "在线工具", "purpose": "编码/解码/加密操作"},
+      "factordb": {"usage": "http://factordb.com", "purpose": "大整数分解查询"},
+      "dcode": {"usage": "https://www.dcode.fr", "purpose": "古典密码分析"}
+    },
+    "forensics_misc": {
+      "binwalk": {"usage": "binwalk -e file", "purpose": "文件分析和提取"},
+      "foremost": {"usage": "foremost -i file -o output/", "purpose": "文件恢复"},
+      "exiftool": {"usage": "exiftool image.jpg", "purpose": "元数据查看"},
+      "steghide": {"usage": "steghide extract -sf image.jpg", "purpose": "JPEG隐写提取"},
+      "zsteg": {"usage": "zsteg image.png -a", "purpose": "PNG/BMP LSB隐写检测"},
+      "stegsolve": {"usage": "java -jar stegsolve.jar", "purpose": "图片隐写分析"},
+      "volatility": {"usage": "vol.py -f dump.raw imageinfo", "purpose": "内存取证"},
+      "wireshark": {"usage": "wireshark capture.pcap", "purpose": "流量分析"},
+      "tshark": {"usage": "tshark -r capture.pcap -Y 'http'", "purpose": "命令行流量分析"},
+      "fcrackzip": {"usage": "fcrackzip -b -l 1-6 file.zip", "purpose": "ZIP密码爆破"},
+      "bkcrack": {"usage": "bkcrack -C enc.zip -c file -p known", "purpose": "ZIP已知明文攻击"}
+    },
+    "reverse_engineering": {
+      "ghidra": {"usage": "ghidra (GUI) 或 analyzeHeadless", "purpose": "反编译和逆向分析"},
+      "ida_pro": {"usage": "ida64 ./binary", "purpose": "反汇编和反编译"},
+      "radare2": {"usage": "r2 ./binary → aaa → pdf @main", "purpose": "命令行逆向分析"},
+      "angr": {"usage": "import angr; p = angr.Project('./binary')", "purpose": "符号执行"},
+      "uncompyle6": {"usage": "uncompyle6 script.pyc", "purpose": "Python字节码反编译"},
+      "jadx": {"usage": "jadx app.apk", "purpose": "Android APK反编译"},
+      "dnSpy": {"usage": "dnSpy assembly.dll", "purpose": ".NET反编译"},
+      "upx": {"usage": "upx -d packed_binary", "purpose": "UPX脱壳"}
+    }
+  },
+  "first_steps_by_challenge_type": {
+    "web": [
+      "1. 访问目标URL，查看页面源码和响应头",
+      "2. 检查robots.txt、.git泄露、备份文件(.bak, .swp, ~)",
+      "3. 目录扫描发现隐藏路径",
+      "4. 识别技术栈(PHP/Python/Java/Node.js)",
+      "5. 测试常见漏洞(SQLi/XSS/SSTI/LFI/命令注入)",
+      "6. 每一步输出都检查是否包含flag"
+    ],
+    "pwn": [
+      "1. checksec检查保护机制",
+      "2. file确认架构(x86/x64/ARM)",
+      "3. 反编译分析漏洞类型",
+      "4. 确定利用方式(ret2text/ret2libc/ROP/格式化字符串/堆)",
+      "5. 编写exploit脚本",
+      "6. 获取shell后cat /flag"
+    ],
+    "crypto": [
+      "1. 识别加密算法类型(RSA/AES/DES/古典密码/自定义)",
+      "2. 分析给定的参数和密文",
+      "3. 查找算法弱点(小参数/错误实现/已知攻击)",
+      "4. 选择对应的攻击工具或编写脚本",
+      "5. 解密得到flag"
+    ],
+    "misc": [
+      "1. file确认文件类型",
+      "2. strings搜索明文flag",
+      "3. binwalk检查嵌入文件",
+      "4. exiftool检查元数据",
+      "5. 根据文件类型选择专用工具(图片→steg工具, pcap→wireshark, 内存→volatility)",
+      "6. 检查各种编码(Base64/Hex/Binary)"
+    ],
+    "reverse": [
+      "1. file确认文件类型和架构",
+      "2. strings搜索有用字符串",
+      "3. checksec检查保护(如果是ELF)",
+      "4. 反编译分析主逻辑",
+      "5. 识别加密/验证算法",
+      "6. 选择求解方式(手动逆向/Z3约束求解/angr符号执行)"
+    ]
+  }
+}

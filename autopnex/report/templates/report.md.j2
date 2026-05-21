@@ -1,0 +1,176 @@
+# AutoPenX 渗透测试报告
+
+- **目标**：`{{ findings.target }}`
+- **开始时间**：{{ findings.started_at }}
+- **LLM 模式**：{{ mode }}
+- **发现条目总数**：{{ findings.findings | length }}
+- **已确认条目数**：{{ findings.findings | selectattr('status', 'equalto', 'confirmed') | list | length }}
+- **工具调用次数**：{{ findings.tool_invocations | length }}
+
+> ⚠️ 本报告由 AutoPenX 自动生成，所有测试仅限授权目标。
+
+## 1. 执行摘要
+
+{{ executive_summary }}
+
+## 2. 目标侦察情报
+
+### 2.1 开放端口
+{% if findings.open_ports %}
+| 端口 | 服务 | Banner |
+|------|------|--------|
+{% for p in findings.open_ports -%}
+| {{ p.port }} | {{ p.service }} | `{{ p.banner | replace('`', "'") }}` |
+{% endfor %}
+{% else %}
+未发现开放端口。
+{% endif %}
+
+### 2.2 识别到的技术栈
+{% if findings.technologies %}
+{% for t in findings.technologies %}- {{ t }}
+{% endfor %}
+{% else %}
+未识别到具体技术栈。
+{% endif %}
+
+### 2.3 子域名 (前 20)
+{% if findings.subdomains %}
+{% for s in findings.subdomains[:20] %}- `{{ s }}`
+{% endfor %}
+{% else %}
+未发现子域名（可能 crt.sh 无记录）。
+{% endif %}
+
+## 3. Web 扫描结果
+
+- 已爬取页面：{{ findings.discovered_paths | length }} 个
+- 表单：{{ findings.forms | length }} 个
+- 参数点：{{ findings.parameters | length }} 个
+
+### 3.1 暴露的敏感文件
+{% if findings.interesting_files %}
+| URL | 状态码 | Content-Type | 大小 |
+|-----|-------|--------------|------|
+{% for f in findings.interesting_files -%}
+| `{{ f.url }}` | {{ f.status }} | {{ f.content_type or '-' }} | {{ f.size }} |
+{% endfor %}
+{% else %}
+未发现显式敏感文件。
+{% endif %}
+
+## 4. 漏洞发现
+
+{% if findings.findings %}
+| # | 严重度 | 状态 | 类型 | CWE | OWASP | CVSS | URL / 参数 |
+|---|-------|------|------|-----|-------|------|------------|
+{% for f in findings.findings -%}
+| {{ loop.index }} | **{{ f.severity }}** | {{ f.status }} | {{ f.title }} | {{ f.cwe_id or '-' }} | {{ f.owasp_category or '-' }} | {{ f.cvss_score or '-' }} | `{{ f.url or '-' }}`{% if f.parameter %} / `{{ f.parameter }}`{% endif %} |
+{% endfor %}
+{% else %}
+本次测试未发现漏洞条目。
+{% endif %}
+
+### 4.1 漏洞详情
+{% for f in findings.findings %}
+#### {{ loop.index }}. [{{ f.severity }} / {{ f.status }}] {{ f.title }}
+
+- **分类**：{{ f.category }}
+- **状态**：{{ f.status }}
+{% if f.cwe_id %}- **CWE**：{{ f.cwe_id }}
+{% endif %}{% if f.owasp_category %}- **OWASP**：{{ f.owasp_category }}
+{% endif %}{% if f.cvss_score %}- **CVSS**：{{ f.cvss_score }}{% if f.cvss_vector %} ({{ f.cvss_vector }}){% endif %}
+{% endif %}- **URL**：`{{ f.url or '-' }}`
+{% if f.parameter %}- **参数**：`{{ f.parameter }}`
+{% endif %}{% if f.payload %}- **Payload**：`{{ f.payload }}`
+{% endif %}- **工具**：{{ f.tool or '-' }}
+- **描述**：{{ f.description }}
+- **证据**：
+  ```
+  {{ f.evidence }}
+  ```
+- **修复建议**：{{ f.recommendation }}
+- **SLA 建议**：{{ severity_sla.get(f.severity | upper, '') }}
+
+{% endfor %}
+
+## 5. 漏洞利用证据
+{% if findings.exploit_evidence %}
+{% for e in findings.exploit_evidence %}
+### 5.{{ loop.index }} {{ e.vulnerability | upper }} — `{{ e.parameter }}` @ `{{ e.url }}`
+
+- **Probe**：{{ e.probe }}
+- **Payload**：`{{ e.payload }}`
+- **命中关键字**：{{ e.markers | join(', ') }}
+- **响应片段**：
+  ```
+  {{ e.excerpt }}
+  ```
+{% endfor %}
+{% else %}
+未进入利用阶段或无可复现证据。
+{% endif %}
+
+## 6. 工具调用轨迹
+
+| 阶段 | 工具 | 成功 | 耗时(ms) | 摘要 |
+|------|------|------|---------|------|
+{% for t in findings.tool_invocations -%}
+| {{ t.state }} | `{{ t.tool }}` | {{ '✅' if t.success else '❌' }} | {{ t.duration_ms }} | {{ t.summary | replace('|', '/') }} |
+{% endfor %}
+
+## 7. 阶段任务与审批轨迹
+
+{% if findings.phase_tasks %}
+{% for phase, tasks in findings.phase_tasks.items() %}
+### 7.{{ loop.index }} {{ phase }}
+| 任务 | 工具 | 状态 | 风险 | 能力 |
+|------|------|------|------|------|
+{% for task in tasks -%}
+| {{ task.title }} | `{{ task.tool }}` | {{ task.status }} | {{ task.risk_level }} | {{ task.required_capability or '-' }} |
+{% endfor %}
+{% endfor %}
+{% else %}
+未记录阶段任务。
+{% endif %}
+
+## 8. 证据产物摘要
+
+{% if findings.evidence_artifacts %}
+| ID | 阶段 | 工具 | 类型 | 摘要 |
+|----|------|------|------|------|
+{% for artifact in findings.evidence_artifacts -%}
+| `{{ artifact.artifact_id }}` | {{ artifact.phase }} | `{{ artifact.tool }}` | {{ artifact.kind }} | {{ artifact.summary | replace('|', '/') }} |
+{% endfor %}
+{% else %}
+未记录结构化证据产物。
+{% endif %}
+
+## 9. 状态机事件日志
+
+{% for e in findings.state_log %}- `[{{ e.timestamp }}]` **{{ e.state }}** ({{ e.level }}) — {{ e.message }}
+{% endfor %}
+
+## 10. OWASP Top 10 2021 合规映射
+
+{% if owasp_summary %}
+| OWASP 分类 | 命中数量 | 说明 |
+|------------|---------|------|
+{% for owasp, count in owasp_summary.items() -%}
+| {{ owasp }} | {{ count }} | {{ owasp_descriptions.get(owasp, '') }} |
+{% endfor %}
+{% else %}
+未发现与 OWASP Top 10 直接关联的漏洞。
+{% endif %}
+
+## 11. 局限性与后续建议
+
+- 本系统采用纯 Python 轻量实现，对深度 SQL 注入、文件包含、反序列化等漏洞覆盖有限，正式评估建议叠加 Burp/SQLMap/Nikto 原生工具。
+- 子域名枚举仅依赖被动 CT 日志，可扩展 DNS 爆破/搜索引擎模块。
+- LLM 决策目前针对参数选择较为粗粒度，可引入每参数优先级评分。
+- 如需 Nuclei 模板扫描、Hydra 暴力破解等 Docker 后端工具，请启用 `AUTOPENX_DOCKER_ENABLED=true` 并构建 `shannon-tools` 镜像。
+- 浏览器自动化测试依赖 Playwright，首次使用需运行 `playwright install chromium`。
+
+---
+
+_Report generated by AutoPenX v0.2 (Shannon-enhanced)_

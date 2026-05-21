@@ -1,0 +1,151 @@
+{
+  "category": "crypto",
+  "description": "Crypto题型常见解题模式与经验库",
+  "patterns": [
+    {
+      "id": "crypto-rsa-small-e",
+      "name": "RSA小公钥指数攻击",
+      "difficulty": "easy",
+      "indicators": ["e=3", "e=5", "e=7", "小指数", "密文较小"],
+      "methodology": [
+        "1. 检查e的值，如果e很小(3,5,7等)",
+        "2. 如果m^e < n，直接对密文开e次方根即可得到明文",
+        "3. 如果m^e略大于n，尝试m^e = c + k*n，遍历k值"
+      ],
+      "tools": ["gmpy2", "sympy", "RsaCtfTool"],
+      "script_template": "import gmpy2\nfrom Crypto.Util.number import long_to_bytes\n\nn = ...\ne = 3\nc = ...\n\n# 直接开方\nm, exact = gmpy2.iroot(c, e)\nif exact:\n    print(long_to_bytes(int(m)))\nelse:\n    # 遍历k\n    for k in range(10000):\n        m, exact = gmpy2.iroot(c + k * n, e)\n        if exact:\n            print(long_to_bytes(int(m)))\n            break"
+    },
+    {
+      "id": "crypto-rsa-common-modulus",
+      "name": "RSA共模攻击",
+      "difficulty": "easy",
+      "indicators": ["相同n", "不同e", "两组密文", "gcd(e1,e2)=1"],
+      "methodology": [
+        "1. 确认两组加密使用相同的n但不同的e",
+        "2. 确认gcd(e1, e2) = 1",
+        "3. 使用扩展欧几里得算法求s1, s2使得 e1*s1 + e2*s2 = 1",
+        "4. 计算 m = c1^s1 * c2^s2 mod n"
+      ],
+      "script_template": "from gmpy2 import gcdext, invert\nfrom Crypto.Util.number import long_to_bytes\n\nn = ...\ne1 = ...\ne2 = ...\nc1 = ...\nc2 = ...\n\n_, s1, s2 = gcdext(e1, e2)\nif s1 < 0:\n    s1 = -s1\n    c1 = invert(c1, n)\nif s2 < 0:\n    s2 = -s2\n    c2 = invert(c2, n)\n\nm = (pow(c1, s1, n) * pow(c2, s2, n)) % n\nprint(long_to_bytes(m))"
+    },
+    {
+      "id": "crypto-rsa-wiener",
+      "name": "RSA Wiener攻击",
+      "difficulty": "medium",
+      "indicators": ["d很小", "e很大", "e接近n", "d < n^0.25"],
+      "methodology": [
+        "1. 当d < n^(1/4)/3时，Wiener攻击有效",
+        "2. 通常表现为e非常大（接近n的大小）",
+        "3. 使用连分数展开e/n来恢复d"
+      ],
+      "tools": ["RsaCtfTool --attack wiener", "owiener库"],
+      "script_template": "import owiener\n\ne = ...\nn = ...\nc = ...\n\nd = owiener.attack(e, n)\nif d:\n    from Crypto.Util.number import long_to_bytes\n    m = pow(c, d, n)\n    print(long_to_bytes(m))"
+    },
+    {
+      "id": "crypto-rsa-fermat",
+      "name": "RSA Fermat分解",
+      "difficulty": "medium",
+      "indicators": ["p和q接近", "|p-q|很小", "n可分解"],
+      "methodology": [
+        "1. 当p和q非常接近时（|p-q| < n^(1/4)），Fermat分解有效",
+        "2. 从sqrt(n)开始向上搜索a，检查a^2-n是否为完全平方数",
+        "3. 如果是，则p=a+b, q=a-b"
+      ],
+      "script_template": "import gmpy2\nfrom Crypto.Util.number import long_to_bytes\n\nn = ...\ne = ...\nc = ...\n\na = gmpy2.isqrt(n) + 1\nwhile True:\n    b2 = a*a - n\n    b = gmpy2.isqrt(b2)\n    if b*b == b2:\n        p = a + b\n        q = a - b\n        break\n    a += 1\n\nphi = (p-1)*(q-1)\nd = gmpy2.invert(e, phi)\nm = pow(c, d, n)\nprint(long_to_bytes(m))"
+    },
+    {
+      "id": "crypto-rsa-factordb",
+      "name": "RSA在线分解",
+      "difficulty": "easy",
+      "indicators": ["n位数较小(<512bit)", "已知的n"],
+      "methodology": [
+        "1. 将n提交到factordb.com查询是否已被分解",
+        "2. 如果n较小(<256bit)，可以直接用yafu或msieve分解"
+      ],
+      "tools": ["factordb.com", "yafu", "msieve", "cado-nfs"]
+    },
+    {
+      "id": "crypto-rsa-dp-leak",
+      "name": "RSA dp泄露攻击",
+      "difficulty": "medium",
+      "indicators": ["dp泄露", "dq泄露", "CRT-RSA", "部分私钥泄露"],
+      "methodology": [
+        "1. 已知dp = d mod (p-1)",
+        "2. 对于e*dp = 1 mod (p-1)，即e*dp - 1 = k*(p-1)",
+        "3. 遍历k从1到e，检查(e*dp-1)/k + 1是否整除n"
+      ],
+      "script_template": "from Crypto.Util.number import long_to_bytes\n\nn = ...\ne = 65537\ndp = ...\nc = ...\n\nfor k in range(1, e):\n    if (e * dp - 1) % k == 0:\n        p = (e * dp - 1) // k + 1\n        if n % p == 0:\n            q = n // p\n            phi = (p-1)*(q-1)\n            d = pow(e, -1, phi)\n            m = pow(c, d, n)\n            print(long_to_bytes(m))\n            break"
+    },
+    {
+      "id": "crypto-classical-caesar",
+      "name": "凯撒密码/ROT",
+      "difficulty": "easy",
+      "indicators": ["字母替换", "位移", "ROT13", "看起来像英文但不可读"],
+      "methodology": [
+        "1. 尝试所有26种位移",
+        "2. 使用频率分析确定最可能的位移量",
+        "3. ROT13是最常见的变体"
+      ],
+      "tools": ["CyberChef", "dcode.fr"]
+    },
+    {
+      "id": "crypto-classical-vigenere",
+      "name": "维吉尼亚密码",
+      "difficulty": "medium",
+      "indicators": ["多表替换", "重复密钥", "Kasiski测试"],
+      "methodology": [
+        "1. 使用Kasiski测试或重合指数确定密钥长度",
+        "2. 对每个位置进行频率分析",
+        "3. 逐位确定密钥"
+      ],
+      "tools": ["CyberChef", "dcode.fr", "Kasiski examination"]
+    },
+    {
+      "id": "crypto-aes-ecb",
+      "name": "AES-ECB模式攻击",
+      "difficulty": "medium",
+      "indicators": ["ECB模式", "相同明文块产生相同密文块", "块大小16字节"],
+      "methodology": [
+        "1. 确认ECB模式（相同输入产生相同输出）",
+        "2. 利用块对齐进行逐字节爆破",
+        "3. 或利用块重排攻击"
+      ]
+    },
+    {
+      "id": "crypto-aes-cbc-padding-oracle",
+      "name": "AES-CBC Padding Oracle攻击",
+      "difficulty": "hard",
+      "indicators": ["CBC模式", "padding错误信息", "不同的错误响应"],
+      "methodology": [
+        "1. 确认存在padding oracle（不同padding产生不同响应）",
+        "2. 逐字节恢复中间值",
+        "3. 利用中间值和IV/前一块密文恢复明文"
+      ],
+      "tools": ["PadBuster", "python-paddingoracle"]
+    },
+    {
+      "id": "crypto-xor",
+      "name": "XOR加密分析",
+      "difficulty": "easy",
+      "indicators": ["异或", "XOR", "单字节密钥", "重复密钥XOR"],
+      "methodology": [
+        "1. 单字节XOR：遍历0-255所有可能的密钥",
+        "2. 重复密钥XOR：确定密钥长度后逐位爆破",
+        "3. 已知明文攻击：plaintext XOR ciphertext = key"
+      ],
+      "script_template": "# 单字节XOR爆破\nciphertext = bytes.fromhex('...')\nfor key in range(256):\n    plaintext = bytes([b ^ key for b in ciphertext])\n    if b'flag' in plaintext:\n        print(f'Key: {key}, Plaintext: {plaintext}')"
+    },
+    {
+      "id": "crypto-hash-length-extension",
+      "name": "哈希长度扩展攻击",
+      "difficulty": "hard",
+      "indicators": ["MAC = hash(secret + message)", "MD5/SHA1/SHA256", "已知hash值和消息"],
+      "methodology": [
+        "1. 确认使用了hash(secret||message)结构",
+        "2. 使用HashPump工具构造扩展消息",
+        "3. 无需知道secret即可构造有效的hash"
+      ],
+      "tools": ["HashPump", "hash_extender"]
+    }
+  ]
+}

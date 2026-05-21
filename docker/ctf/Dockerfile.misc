@@ -1,0 +1,53 @@
+FROM ubuntu:22.04
+
+LABEL maintainer="AutoPenX CTF Sandbox"
+LABEL description="CTF Misc challenge sandbox with forensics and steganography tools"
+
+# Avoid interactive prompts during package installation
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install system dependencies and misc/forensics tools
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    python3-pip \
+    python3-dev \
+    binwalk \
+    steghide \
+    exiftool \
+    wireshark-common \
+    tshark \
+    foremost \
+    strings \
+    file \
+    xxd \
+    hexdump \
+    zip \
+    unzip \
+    p7zip-full \
+    git \
+    curl \
+    wget \
+    netcat-openbsd \
+    imagemagick \
+    ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python misc/forensics tools
+RUN pip3 install --no-cache-dir \
+    pwntools==4.12.0 \
+    Pillow==10.3.0 \
+    scapy==2.5.0 \
+    stegano==0.11.2 \
+    pyshark==0.6 \
+    python-magic==0.4.27
+
+# Create non-root user for security
+RUN useradd -m -u 1000 -s /bin/bash ctfuser
+
+# Set working directory
+WORKDIR /workspace
+
+# Switch to non-root user
+USER ctfuser
+
+CMD ["/bin/bash"]

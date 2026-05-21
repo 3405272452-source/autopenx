@@ -1,0 +1,88 @@
+[build-system]
+requires = ["hatchling>=1.21"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cet4-study-app"
+version = "0.1.0"
+description = "Local-first desktop app for 20-day CET-4 sprint preparation (题库、判分、AI 批阅、学习计划)."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [
+    { name = "CET4 Study App Authors" },
+]
+keywords = ["cet4", "study", "desktop", "pyside6"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Win32 (MS Windows)",
+    "Environment :: X11 Applications :: Qt",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Education",
+]
+
+# Runtime dependencies. Versions follow design.md `技术栈确认` and requirements.md.
+# NOTE: `domain` layer must not import PySide6 / httpx / sqlalchemy — enforced by
+# import-linter in task 1.2. These deps are required by the `application`/
+# `infrastructure`/`ui` layers only.
+dependencies = [
+    "pyside6>=6.7",
+    "pydantic>=2.7",
+    "pdfplumber>=0.11",
+    "pymupdf>=1.24",
+    "sqlalchemy>=2.0",
+    "httpx[http2]>=0.27",
+    "tenacity>=8.2",
+    "keyring>=24.3",
+    "cryptography>=42.0",
+]
+
+[project.optional-dependencies]
+# Test / lint / quality tooling. Installed via `pip install -e .[dev]`.
+dev = [
+    "hypothesis>=6",
+    "pytest>=8.0",
+    "pytest-qt>=4.4",
+    "respx>=0.21",
+    "ruff>=0.5",
+    "import-linter>=2.0",
+    "coverage>=7.5",
+]
+
+[project.scripts]
+cet4-app = "cet4_app.__main__:main"
+
+[project.urls]
+"Homepage" = "https://example.invalid/cet4-study-app"
+"Source" = "https://example.invalid/cet4-study-app"
+
+# ---------------------------------------------------------------------------
+# Build backend configuration (hatchling). The project uses a src/ layout with
+# the `cet4_app` package living under `src/cet4_app/`. AutoPenX source (at the
+# workspace root under `autopnex/`) is intentionally NOT part of this wheel.
+# ---------------------------------------------------------------------------
+[tool.hatch.build.targets.wheel]
+packages = ["src/cet4_app"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src/cet4_app",
+    "/README.md",
+    "/pyproject.toml",
+]
+
+# ---------------------------------------------------------------------------
+# Tooling placeholders — full configuration for these tools is added in task 1.2.
+# ---------------------------------------------------------------------------
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["src", "tests"]
+
+# NOTE: pytest / hypothesis / coverage configuration is owned by pytest.ini and
+# .coveragerc (see task 1.2) and is intentionally NOT duplicated here.
