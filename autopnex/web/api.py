@@ -336,7 +336,7 @@ def _detect_file_type_magic(content: bytes) -> str:
 # "check": CLI command name for shutil.which() or Python module for importlib
 CTF_TOOLS: List[Dict[str, Any]] = [
     # Core ReAct tools
-    {"name": "http_request", "category": "Core", "description": "HTTP 请求与会话保持", "builtin": True},
+    {"name": "http_request", "category": "Core", "description": "HTTP 请求与会话保持。对于 SQL 注入可通过 run_python 调用 autopnex.tools.ctf_web.sqlmap_wrapper.run_sqlmap() 自动化检测", "builtin": True},
     {"name": "run_python", "category": "Core", "description": "临时 Python 脚本执行", "builtin": True},
     {"name": "decode_data", "category": "Core", "description": "编码解码与自动识别", "builtin": True},
     {"name": "scan_flag", "category": "Core", "description": "Flag 格式扫描", "builtin": True},

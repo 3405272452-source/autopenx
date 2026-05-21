@@ -102,6 +102,11 @@ class RouteResult:
     steps_executed: int = 0
     stop_reason: str = ""
     handoff_target: Optional[str] = None
+    # Diagnostic fields
+    scenario: str = ""
+    last_request_url: str = ""
+    last_response_excerpt: str = ""
+    blockers: List[str] = field(default_factory=list)
     attempts_made: List[Dict] = field(default_factory=list)
 
 
@@ -166,13 +171,26 @@ class RouteStateMachine(ABC):
     def _get(self, path: str, params: Optional[Dict[str, str]] = None, **kwargs) -> requests.Response:
         url = urljoin(self.target_url + "/", path.lstrip("/"))
         resp = self.session.get(url, params=params, timeout=8, allow_redirects=False, **kwargs)
-        self._http_history.append({"method": "GET", "url": url, "params": params, "status": resp.status_code})
+        self._http_history.append({
+            "method": "GET",
+            "url": url,
+            "params": params,
+            "status": resp.status_code,
+            "response_excerpt": (resp.text[:200] if resp.text else ""),
+            "response_length": len(resp.content) if resp.content else 0,
+        })
         return resp
 
     def _post(self, path: str, data: Any = None, **kwargs) -> requests.Response:
         url = urljoin(self.target_url + "/", path.lstrip("/"))
         resp = self.session.post(url, data=data, timeout=8, allow_redirects=False, **kwargs)
-        self._http_history.append({"method": "POST", "url": url, "status": resp.status_code})
+        self._http_history.append({
+            "method": "POST",
+            "url": url,
+            "status": resp.status_code,
+            "response_excerpt": (resp.text[:200] if resp.text else ""),
+            "response_length": len(resp.content) if resp.content else 0,
+        })
         return resp
 
     def _check_response(self, resp: requests.Response, needle: str) -> bool:
@@ -498,6 +516,15 @@ class RouteStateMachine(ABC):
         if not self.state.stop_reason:
             self.state.stop_reason = "exploit_chain_complete"
         return False, None
+
+    def get_last_request_info(self) -> Tuple[str, str]:
+        """Return (last_request_url, last_response_excerpt) from HTTP history."""
+        if self._http_history:
+            last = self._http_history[-1]
+            url = last.get("url", "")
+            excerpt = last.get("response_excerpt", "")
+            return url, excerpt
+        return "", ""
 
     def _execute_step(self, step_def: Dict[str, Any]) -> requests.Response:
         """Execute a single exploit step definition."""

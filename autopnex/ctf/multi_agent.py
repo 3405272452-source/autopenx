@@ -783,6 +783,42 @@ class ReconAgent(BaseAgent):
                 observation="Ping/IP input detected (command injection likely)",
             )
 
+        # --- Scenario hints for specific patterns ---
+
+        # "fxck your space" → cmdi with space bypass
+        if "fxck" in text_lower and "space" in text_lower:
+            self.blackboard.add_scenario_hint(
+                route="cmdi",
+                scenario="cmdi",
+                confidence=0.9,
+                source="recon_fingerprint",
+                detail="Page contains 'fxck your space' — space bypass needed",
+                payload_family="space_bypass",
+            )
+
+        # SQL error keywords → sqli error_based
+        sql_error_signals = ["sql syntax", "mysql_fetch", "sqlite3", "pg_query", "odbc"]
+        if any(sig in text_lower for sig in sql_error_signals):
+            self.blackboard.add_scenario_hint(
+                route="sqli",
+                scenario="sqli",
+                confidence=0.85,
+                source="recon_fingerprint",
+                detail="SQL error keywords detected — error-based injection",
+                payload_family="error_based",
+            )
+
+        # "md5" in page → php_pop with md5 type juggling
+        if "md5" in text_lower:
+            self.blackboard.add_scenario_hint(
+                route="php_pop",
+                scenario="php_pop",
+                confidence=0.7,
+                source="recon_fingerprint",
+                detail="md5 reference in page — possible type juggling",
+                payload_family="md5_type_juggling",
+            )
+
     def _follow_interesting_links(self) -> Dict[str, Any]:
         """Follow links discovered during scan that might contain flags directly.
 

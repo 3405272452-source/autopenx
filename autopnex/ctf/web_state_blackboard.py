@@ -135,6 +135,17 @@ class CandidateFlag:
             self.timestamp = time.time()
 
 
+@dataclass
+class ScenarioHint:
+    """Hint about the likely attack scenario for a route."""
+    route: str
+    scenario: str
+    confidence: float
+    source: str
+    detail: str
+    payload_family: str = ""
+
+
 # ---------------------------------------------------------------------------
 # WebStateBlackboard
 # ---------------------------------------------------------------------------
@@ -175,6 +186,7 @@ class WebStateBlackboard:
         self.round: int = 0
         self.rounds_since_last_evidence: int = 0
         self.blockers: List[str] = []
+        self.scenario_hints: List[ScenarioHint] = []
         self.created_at: float = time.time()
 
     # ------------------------------------------------------------------
@@ -365,6 +377,31 @@ class WebStateBlackboard:
 
     def get_latest_csrf(self) -> Optional[str]:
         return list(self.csrf_tokens.values())[-1] if self.csrf_tokens else None
+
+    # ------------------------------------------------------------------
+    # Scenario Hints
+    # ------------------------------------------------------------------
+
+    def add_scenario_hint(
+        self,
+        route: str,
+        scenario: str,
+        confidence: float,
+        source: str,
+        detail: str,
+        payload_family: str = "",
+    ) -> ScenarioHint:
+        """Add a scenario hint for a route."""
+        hint = ScenarioHint(
+            route=route,
+            scenario=scenario,
+            confidence=confidence,
+            source=source,
+            detail=detail,
+            payload_family=payload_family,
+        )
+        self.scenario_hints.append(hint)
+        return hint
 
     # ------------------------------------------------------------------
     # Route management
@@ -737,6 +774,11 @@ class WebStateBlackboard:
             ],
             "candidate_flags": len(self.candidate_flags),
             "blockers": self.blockers,
+            "scenario_hints": [
+                {"route": h.route, "scenario": h.scenario, "confidence": h.confidence,
+                 "payload_family": h.payload_family, "detail": h.detail}
+                for h in self.scenario_hints
+            ],
             "round": self.round,
             "rounds_since_evidence": self.rounds_since_last_evidence,
         }
