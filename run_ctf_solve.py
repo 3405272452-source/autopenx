@@ -54,6 +54,7 @@ async def solve():
         runtime_config=runtime,
         progress_callback=progress_callback,
         knowledge_base_path=str(Path(r"c:\Users\86181\Desktop\AutoPenX") / "ctf_knowledge.json"),
+        multi_agent=True,  # Hybrid: deterministic routes first, then LLM ReAct fallback
     )
     result = await agent.solve()
     return result

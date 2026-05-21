@@ -1026,37 +1026,103 @@ class CTFReActAgent:
         )
 
     async def _solve_multi_agent(self, start_time: float) -> Dict[str, Any]:
-        """Delegate to MultiAgentOrchestrator (rule-based collaboration)."""
+        """Hybrid solve: MultiAgentOrchestrator first, then ReAct LLM fallback.
+
+        Strategy:
+          1. Run deterministic state machine routes (fast, zero API cost)
+          2. If flag found → return immediately
+          3. If not found → fall back to full LLM ReAct loop with remaining budget
+             The LLM gets the blackboard state as context so it doesn't repeat
+             what the state machine already tried.
+        """
         from .multi_agent import MultiAgentOrchestrator
 
+        # Phase 1: Deterministic multi-agent (fast path)
         orch = MultiAgentOrchestrator(
             target_url=self.target,
             flag_format=self.flag_format,
-            max_rounds=self.max_iterations,
+            max_rounds=min(self.max_iterations, 15),
             session=self._session,
         )
-        found, flag, action_log = orch.run_loop(max_rounds=self.max_iterations)
-
-        duration_ms = int((time.time() - start_time) * 1000)
-        iterations = len(set(e.get("round", 0) for e in action_log))
-        self._steps = action_log
+        found, flag, action_log = orch.run_loop(max_rounds=min(self.max_iterations, 15))
 
         if found and flag:
+            duration_ms = int((time.time() - start_time) * 1000)
+            iterations = len(set(e.get("round", 0) for e in action_log))
+            self._steps = action_log
             self._emit("ctf_flag_found", flag=flag, iterations=iterations)
             return self._result(
                 success=True,
                 flag=flag,
-                reasoning=f"Multi-Agent: flag found via {orch.get_state_summary()['coordinator']['route_attempts']}",
+                reasoning=f"Multi-Agent deterministic: flag found",
                 duration_ms=duration_ms,
             )
 
-        self._emit("ctf_no_flag", reason="max_rounds" if iterations >= self.max_iterations else "exhausted")
-        return self._result(
-            success=False,
-            reasoning=f"Multi-Agent: {len(action_log)} log entries, {iterations} rounds",
-            duration_ms=duration_ms,
-            error="flag_not_found",
+        # Phase 2: LLM ReAct fallback with remaining budget
+        elapsed = time.time() - start_time
+        remaining_time = self.timeout - elapsed
+        remaining_iters = max(5, self.max_iterations - len(action_log))
+
+        if remaining_time < 30:
+            # Not enough time for LLM fallback
+            duration_ms = int(elapsed * 1000)
+            return self._result(
+                success=False,
+                reasoning=f"Multi-Agent exhausted {len(action_log)} rounds, no time for LLM fallback",
+                duration_ms=duration_ms,
+                error="flag_not_found",
+            )
+
+        log.info(
+            "Multi-Agent failed after %d rounds. Falling back to LLM ReAct "
+            "(remaining: %d iters, %.0fs)",
+            len(action_log), remaining_iters, remaining_time,
         )
+        self._emit("ctf_multi_agent_fallback", reason="deterministic_routes_exhausted")
+
+        # Inject blackboard context into LLM messages so it knows what was tried
+        bb_summary = orch.get_state_summary()
+        tried_routes = list(bb_summary["coordinator"]["route_attempts"].keys())
+        context_msg = (
+            f"[System] The deterministic exploit engine already tried these routes "
+            f"without finding the flag: {', '.join(tried_routes)}.\n"
+            f"Evidence collected: {bb_summary['blackboard'].get('top_evidence', [])[:3]}\n"
+            f"Now YOU must analyze the target creatively. Use http_request to interact "
+            f"with the target and run_python for complex payloads. Do NOT repeat the "
+            f"same approaches that already failed."
+        )
+
+        # Switch to standard ReAct mode with reduced budget
+        self.multi_agent = False  # Prevent recursion
+        self.max_iterations = remaining_iters
+        self.timeout = int(remaining_time)
+
+        # Inject context before starting ReAct
+        self._messages.clear()
+        self._messages.extend(self._build_initial_messages())
+        self._messages.append({"role": "user", "content": context_msg})
+
+        # Run the standard ReAct loop (this calls _call_llm iteratively)
+        # We need to re-enter solve() but without multi_agent flag
+        from ..orchestrator.llm_client import LLMClient, LLMError
+        try:
+            self._llm = LLMClient()
+            if not self._llm.enabled:
+                duration_ms = int((time.time() - start_time) * 1000)
+                return self._result(
+                    False,
+                    duration_ms=duration_ms,
+                    error="LLM not available for fallback",
+                )
+        except Exception as e:
+            duration_ms = int((time.time() - start_time) * 1000)
+            return self._result(False, duration_ms=duration_ms, error=f"LLM init failed: {e}")
+
+        # Run ReAct loop inline (same logic as solve() but without re-init)
+        result = await self.solve()
+        # Restore multi_agent flag
+        self.multi_agent = True
+        return result
 
     def _result(
         self,
