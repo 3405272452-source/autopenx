@@ -1417,7 +1417,7 @@ class MultiAgentOrchestrator:
     def __init__(
         self,
         target_url: str,
-        flag_format: str = r"[A-Za-z0-9_]+\{[^}]+\}",
+        flag_format: str = r"flag\{[^}]+\}",
         max_rounds: int = 15,
         session: Optional[requests.Session] = None,
     ):
@@ -1425,7 +1425,7 @@ class MultiAgentOrchestrator:
         self.flag_format = flag_format
 
         # Shared blackboard
-        self.blackboard = WebStateBlackboard(target_url=target_url)
+        self.blackboard = WebStateBlackboard(target_url=target_url, flag_format=flag_format)
 
         # Specialist agents
         session = session or requests.Session()

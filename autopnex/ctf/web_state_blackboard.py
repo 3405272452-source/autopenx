@@ -146,7 +146,7 @@ class WebStateBlackboard:
     decide what to do next; tool results update the blackboard automatically.
     """
 
-    def __init__(self, target_url: str, challenge_type: str = "web", flag_format: str = r"[A-Za-z0-9_]+\{[^}]+\}"):
+    def __init__(self, target_url: str, challenge_type: str = "web", flag_format: str = r"flag\{[^}]+\}"):
         self.target_url = target_url.rstrip("/")
         self.challenge_type = challenge_type
         self.flag_format = flag_format
@@ -508,15 +508,119 @@ class WebStateBlackboard:
         return cf
 
     def check_and_record_flag(self, text: str, source: str = "") -> Optional[str]:
-        """Check text for flag pattern and record if found."""
+        """Check text for flag pattern and record if found.
+
+        After regex matching, uses AI (if available) to validate whether
+        the candidate is a real CTF flag or a false positive (e.g. CSS rule,
+        JS object literal). If AI says it's not a flag, the candidate is
+        discarded.
+        """
         if not text:
             return None
         match = self._flag_re.search(text)
         if match:
             flag_val = match.group(0)
+            # AI validation: ask LLM to confirm this is a real flag
+            if not self._ai_validate_flag(flag_val, text, source):
+                log.debug("Flag candidate rejected by AI validation: %s", flag_val[:60])
+                return None
             self.add_flag_candidate(flag_val, source, confidence=0.9)
             return flag_val
         return None
+
+    def _ai_validate_flag(self, candidate: str, context_text: str, source: str) -> bool:
+        """Use AI to validate whether a regex-matched string is a real CTF flag.
+
+        Returns True if:
+          - AI confirms it looks like a flag, OR
+          - AI is unavailable (fail-open: don't block when LLM is down)
+
+        Returns False if AI confidently says it's NOT a flag (CSS, JS, etc.)
+        """
+        # Fast-path: known strict prefixes are always valid — skip AI call
+        _KNOWN_FLAG_PREFIXES = (
+            "flag{", "ctf{", "hctf{", "dasctf{", "nctf{", "actf{",
+            "sctf{", "rctf{", "gwctf{", "buuctf{",
+        )
+        if candidate.lower().startswith(_KNOWN_FLAG_PREFIXES):
+            return True
+
+        # Fast-path rejection: obvious CSS/JS patterns (no AI needed)
+        prefix = candidate.split("{")[0].lower() if "{" in candidate else ""
+        _OBVIOUS_NON_FLAGS = {
+            "input", "body", "div", "span", "html", "form", "table",
+            "button", "select", "textarea", "label", "section", "header",
+            "footer", "nav", "main", "aside", "article", "style", "script",
+            "function", "class", "const", "let", "var", "return", "export",
+            "import", "if", "else", "for", "while", "switch", "case",
+            "p", "a", "h1", "h2", "h3", "h4", "h5", "h6", "pre", "code",
+            "ul", "ol", "li", "tr", "td", "th", "img", "svg",
+        }
+        if prefix in _OBVIOUS_NON_FLAGS:
+            return False
+
+        # Content heuristic: if content inside {} has CSS-like patterns, reject
+        inner = candidate.split("{", 1)[1].rstrip("}") if "{" in candidate else ""
+        if inner.count(":") >= 2 and inner.count(";") >= 2:
+            return False
+        if "\n" in inner or "\r" in inner:
+            return False
+        if len(inner) > 100:
+            return False
+
+        # AI validation — only for ambiguous cases
+        try:
+            from autopnex.orchestrator.llm_client import LLMClient, LLMError
+            llm = LLMClient()
+            if not llm.enabled:
+                return True  # Fail-open: no API key → trust regex
+
+            # Provide minimal context (50 chars around the match)
+            ctx_snippet = context_text[:200] if len(context_text) <= 200 else ""
+            if not ctx_snippet:
+                # Find the candidate in text and extract surrounding context
+                idx = context_text.find(candidate)
+                if idx >= 0:
+                    start = max(0, idx - 50)
+                    end = min(len(context_text), idx + len(candidate) + 50)
+                    ctx_snippet = context_text[start:end]
+                else:
+                    ctx_snippet = context_text[:200]
+
+            messages = [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a CTF flag validator. Given a candidate string extracted "
+                        "by regex from an HTTP response, determine if it is a real CTF flag "
+                        "or a false positive (CSS rule, JavaScript code, HTML tag, etc.).\n"
+                        "Reply with ONLY 'YES' if it is a real CTF flag, or 'NO' if it is not.\n"
+                        "A real CTF flag typically looks like: prefix{alphanumeric_or_leet_speak} "
+                        "where prefix is a short team/event name and content is 5-60 chars of "
+                        "hex, leet speak, or meaningful text. CSS rules, JS objects, and HTML "
+                        "are NOT flags."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"Candidate: {candidate}\n"
+                        f"Source: {source}\n"
+                        f"Context: {ctx_snippet}\n\n"
+                        f"Is this a real CTF flag? Reply YES or NO only."
+                    ),
+                },
+            ]
+
+            result = llm.chat(messages, temperature=0.0, max_tokens=10)
+            answer = result.get("content", "").strip().upper()
+            if answer.startswith("NO"):
+                return False
+            return True  # YES or ambiguous → accept
+
+        except Exception as e:
+            log.debug("AI flag validation failed (accepting candidate): %s", e)
+            return True  # Fail-open: any error → trust regex
 
     def get_unverified_flags(self) -> List[CandidateFlag]:
         return [cf for cf in self.candidate_flags if not cf.verified]

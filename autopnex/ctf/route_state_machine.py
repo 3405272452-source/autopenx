@@ -235,18 +235,100 @@ class RouteStateMachine(ABC):
             return None
 
     def _check_flag(self, text: str) -> Optional[str]:
-        """Extract flag pattern from text."""
-        patterns = [
+        """Extract flag pattern from text.
+
+        Uses progressively looser patterns but validates matches to avoid
+        false positives from CSS rules (e.g. 'input{ border:... }') and
+        JavaScript object literals.
+        """
+        # Strict patterns — known CTF flag prefixes
+        strict_patterns = [
             r'flag\{[^}]+\}',
             r'CTF\{[^}]+\}',
             r'HCTF\{[^}]+\}',
-            r'[A-Za-z0-9_]+\{[^}]+\}',
+            r'DASCTF\{[^}]+\}',
+            r'NCTF\{[^}]+\}',
+            r'ACTF\{[^}]+\}',
+            r'SCTF\{[^}]+\}',
+            r'RCTF\{[^}]+\}',
+            r'GWCTF\{[^}]+\}',
+            r'BUUCTF\{[^}]+\}',
         ]
-        for pat in patterns:
-            m = re.search(pat, text)
+        for pat in strict_patterns:
+            m = re.search(pat, text, re.IGNORECASE)
             if m:
                 return m.group(0)
+
+        # Loose pattern — generic prefix{content} but with validation
+        # to reject CSS/JS false positives
+        loose_pat = r'([A-Za-z][A-Za-z0-9_]{1,20})\{([^}]{1,100})\}'
+        _CSS_JS_PREFIXES = frozenset({
+            "input", "body", "div", "span", "html", "form", "table",
+            "button", "select", "textarea", "label", "section", "header",
+            "footer", "nav", "main", "aside", "article", "ul", "ol", "li",
+            "img", "video", "audio", "canvas", "svg", "path", "circle",
+            "function", "class", "const", "let", "var", "return", "export",
+            "import", "if", "else", "for", "while", "switch", "case",
+            "style", "script", "link", "meta", "title", "head",
+            "p", "a", "h1", "h2", "h3", "h4", "h5", "h6", "pre", "code",
+            "tr", "td", "th", "thead", "tbody", "tfoot", "fieldset",
+        })
+        for m in re.finditer(loose_pat, text):
+            prefix = m.group(1)
+            content = m.group(2)
+            # Skip if prefix is a common CSS/JS keyword
+            if prefix.lower() in _CSS_JS_PREFIXES:
+                continue
+            # Skip if content looks like CSS (contains colons + semicolons)
+            if content.count(":") >= 2 and content.count(";") >= 2:
+                continue
+            # Skip if content contains newlines (CSS blocks span multiple lines)
+            if "\n" in content or "\r" in content:
+                continue
+            # AI validation for ambiguous loose matches
+            candidate = m.group(0)
+            if self._ai_confirm_flag(candidate, text):
+                return candidate
+
         return None
+
+    def _ai_confirm_flag(self, candidate: str, context_text: str) -> bool:
+        """Ask AI to confirm a loose-pattern flag candidate.
+
+        Returns True if AI confirms or is unavailable (fail-open).
+        Returns False if AI says it's not a flag.
+        """
+        try:
+            from autopnex.orchestrator.llm_client import LLMClient, LLMError
+            llm = LLMClient()
+            if not llm.enabled:
+                return True  # No API key → trust regex
+
+            idx = context_text.find(candidate)
+            start = max(0, idx - 50) if idx >= 0 else 0
+            end = min(len(context_text), (idx if idx >= 0 else 0) + len(candidate) + 50)
+            ctx_snippet = context_text[start:end] if idx >= 0 else context_text[:200]
+
+            messages = [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a CTF flag validator. Given a candidate string from an HTTP "
+                        "response, determine if it is a real CTF flag or a false positive "
+                        "(CSS, JS, HTML, etc.). Reply ONLY 'YES' or 'NO'.\n"
+                        "Real flags look like: prefix{leet_speak_or_hex_5_to_60_chars}."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": f"Candidate: {candidate}\nContext: {ctx_snippet}\nIs this a real CTF flag?",
+                },
+            ]
+            result = llm.chat(messages, temperature=0.0, max_tokens=10)
+            answer = result.get("content", "").strip().upper()
+            return not answer.startswith("NO")
+        except Exception:
+            return True  # Fail-open
 
     def _flag_found(self, text: str) -> bool:
         return self._check_flag(text) is not None
