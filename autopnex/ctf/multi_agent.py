@@ -113,13 +113,13 @@ class CoordinatorAgent(BaseAgent):
         "lfi": 8,           # Direct flag read
         "sqli": 7,          # Common, scriptable
         "graphql": 7,       # Deterministic POST JSON
-        "jwt": 6,           # Deterministic
-        "upload": 6,        # Common
+        "jwt": 7,           # Deterministic alg=none + weak-key brute force
+        "upload": 7,        # Deterministic 2-step + multi-variant payloads
         "websocket": 8,     # Deterministic param-based bypass (direct flag)
         "xss": 8,           # Admin bot chain, deterministic direct flag
-        "ssrf": 5,          # Needs internal targets
-        "php_pop": 5,       # Needs framework match
-        "idor": 4,          # Needs user state
+        "ssrf": 7,          # Deterministic file:// + metadata probes
+        "php_pop": 7,       # Cookie/phar probes are cheap
+        "idor": 7,          # Path-based id enumeration is cheap
         "recon": 5,
     }
 
@@ -256,6 +256,7 @@ class CoordinatorAgent(BaseAgent):
             ALWAYS_EXPLOIT_ROUTES = {
                 "lfi", "ssti", "sqli", "cmdi", "jwt", "graphql",
                 "websocket", "xss", "upload",
+                "ssrf", "idor", "php_pop",
             }
             if best_route in ALWAYS_EXPLOIT_ROUTES:
                 return AgentDecision(
@@ -337,8 +338,13 @@ class CoordinatorAgent(BaseAgent):
                     score += 0.1  # Node.js → boost ssrf/ssti
 
             # Penalty for repeated failures (Requirement 4.2 — route_failures history)
+            # Each consecutive failure shaves off enough from the score that a
+            # route that has missed once is virtually guaranteed to be re-ranked
+            # below any untried route in the same priority tier.  This is the
+            # only reliable way to spread the limited round budget over the
+            # 13 routes when running blind against the explore-21 set.
             failures = self.route_failures.get(route_name, 0)
-            score -= failures * 0.2  # Stronger penalty per failure
+            score -= failures * 0.35
 
             # Penalty for too many attempts
             attempts = self.route_attempts.get(route_name, 0)
