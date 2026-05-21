@@ -1257,6 +1257,181 @@ class ExploitAgent(BaseAgent):
                 "error": str(e),
             }
 
+    # ------------------------------------------------------------------
+    # LLM-in-the-loop fallback
+    # ------------------------------------------------------------------
+
+    def _llm_fallback(self, route: str, result: RouteResult) -> Optional[str]:
+        """Multi-turn LLM-driven exploit when the state machine fails.
+
+        Strategy:
+          1. Feed LLM the target URL, route type, and recent HTTP responses
+          2. LLM suggests an HTTP request (method, path, params, headers, data)
+          3. Execute it, check for flag
+          4. If no flag, feed the response back to LLM for up to MAX_LLM_TURNS
+          5. Return flag if found, None otherwise
+
+        This is the key differentiator from a pure fuzzer: the LLM can
+        analyze responses, understand error messages, and construct
+        targeted payloads that aren't in any pre-built list.
+        """
+        MAX_LLM_TURNS = 3
+
+        try:
+            from autopnex.orchestrator.llm_client import LLMClient
+        except Exception:
+            return None
+
+        try:
+            llm = LLMClient()
+            if not llm.enabled:
+                return None
+
+            # Collect context: recent HTTP responses from state machine attempts
+            attempts = [a for a in self.blackboard.attempts if a.route == route]
+            recent = attempts[-3:] if attempts else []
+            history_lines = []
+            for att in recent:
+                summary = att.result_summary or f"{att.tool} -> {'ok' if att.success else 'fail'}"
+                history_lines.append(f"  - {summary[:300]}")
+            formatted_history = "\n".join(history_lines) if history_lines else "  (no prior attempts)"
+
+            # Also grab the last few HTTP responses from the state machine
+            # (stored in blackboard endpoints as status codes, but we need actual content)
+            # Fetch the target homepage for initial context
+            try:
+                homepage_resp = self.session.get(self.target_url, timeout=10, allow_redirects=True)
+                homepage_preview = homepage_resp.text[:1500] if homepage_resp.text else "(empty)"
+            except Exception:
+                homepage_preview = "(failed to fetch)"
+
+            # Build initial system + user messages for multi-turn conversation
+            system_msg = {
+                "role": "system",
+                "content": (
+                    "You are an expert Web CTF player. Your goal is to find the flag on the target.\n"
+                    "The deterministic exploit engine already tried common payloads and failed.\n"
+                    "Now YOU must analyze the target's responses and craft precise payloads.\n\n"
+                    "Rules:\n"
+                    "- Reply with EXACTLY one JSON object per turn (no markdown, no explanation)\n"
+                    "- Format: {\"method\": \"GET|POST\", \"path\": \"/...\", \"params\": {}, "
+                    "\"headers\": {}, \"data\": \"...\", \"reasoning\": \"...\"}\n"
+                    "- If you believe the target is unsolvable, reply: {\"give_up\": true}\n"
+                    "- Analyze each response carefully — look for error messages, hints, "
+                    "parameter names, SQL errors, template syntax, file paths, etc.\n"
+                    "- The flag format is typically: flag{...}\n"
+                    "- Common CTF techniques: SQLi, SSTI, LFI, CMDi, JWT manipulation, "
+                    "SSRF, file upload, deserialization, IDOR, XSS+admin bot"
+                ),
+            }
+
+            user_msg_initial = {
+                "role": "user",
+                "content": (
+                    f"Target: {self.target_url}\n"
+                    f"Route attempted: {route}\n"
+                    f"State machine result: status={result.status}, "
+                    f"stop_reason={result.stop_reason}, "
+                    f"steps_executed={result.steps_executed}\n\n"
+                    f"Prior attempts:\n{formatted_history}\n\n"
+                    f"Homepage response (first 1500 chars):\n{homepage_preview}\n\n"
+                    f"Analyze the homepage and suggest your first exploit request."
+                ),
+            }
+
+            messages = [system_msg, user_msg_initial]
+
+            for turn in range(MAX_LLM_TURNS):
+                resp = llm.chat(messages, temperature=0.3, max_tokens=800)
+                content = resp.get("content", "")
+                if not content:
+                    return None
+
+                # Parse LLM response
+                # Strip markdown code fences if present
+                clean = content.strip()
+                if clean.startswith("```"):
+                    clean = clean.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+
+                try:
+                    payload = json.loads(clean)
+                except json.JSONDecodeError:
+                    # Try to extract JSON from mixed text
+                    import re as _re
+                    json_match = _re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', clean)
+                    if json_match:
+                        try:
+                            payload = json.loads(json_match.group(0))
+                        except json.JSONDecodeError:
+                            return None
+                    else:
+                        return None
+
+                if payload.get("give_up") or payload.get("skip"):
+                    return None
+
+                # Execute the suggested request
+                method = payload.get("method", "GET").upper()
+                path = payload.get("path", "/")
+                params = payload.get("params") or {}
+                headers = payload.get("headers") or {}
+                data = payload.get("data")
+
+                url = self.target_url.rstrip("/") + "/" + path.lstrip("/")
+                try:
+                    if method == "POST":
+                        http_resp = self.session.post(
+                            url, params=params, data=data, headers=headers,
+                            timeout=15, allow_redirects=True,
+                        )
+                    else:
+                        http_resp = self.session.get(
+                            url, params=params, headers=headers,
+                            timeout=15, allow_redirects=True,
+                        )
+                except Exception as e:
+                    # Network error — tell LLM and let it try again
+                    messages.append({"role": "assistant", "content": content})
+                    messages.append({
+                        "role": "user",
+                        "content": f"Request failed with error: {e}\nTry a different approach.",
+                    })
+                    continue
+
+                response_text = http_resp.text[:2000] if http_resp.text else "(empty)"
+
+                # Check for flag in response
+                flag = self.blackboard.check_and_record_flag(
+                    http_resp.text, source=f"llm_fallback_{route}_turn{turn}"
+                )
+                if flag:
+                    log.info(
+                        "LLM-in-the-loop found flag on turn %d for route %s: %s",
+                        turn + 1, route, flag[:40],
+                    )
+                    return flag
+
+                # No flag yet — feed response back to LLM for next turn
+                messages.append({"role": "assistant", "content": content})
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        f"HTTP {http_resp.status_code} response "
+                        f"({len(http_resp.text or '')} bytes):\n"
+                        f"{response_text}\n\n"
+                        f"No flag found yet. Analyze this response and suggest "
+                        f"your next request. Look for clues in error messages, "
+                        f"HTML structure, headers, or parameter names."
+                    ),
+                })
+
+            # All turns exhausted
+            return None
+
+        except Exception as e:
+            log.debug(f"LLM fallback error for route {route}: {e}")
+            return None
+
 
 # ---------------------------------------------------------------------------
 # CriticAgent
@@ -1559,6 +1734,38 @@ class MultiAgentOrchestrator:
                     return True, flag_candidate.value, action_log
 
         # Requirement 4.6: max_rounds exhausted — graceful degradation
+
+        # LLM-in-the-loop fallback: when all deterministic routes failed,
+        # give the LLM 3 turns to analyze the target and find the flag.
+        # This is the key capability upgrade — the LLM can handle novel
+        # challenges that aren't covered by the state machine's payload lists.
+        if not self.blackboard.candidate_flags:
+            # Find the route with the best evidence to give LLM context
+            best_route = "sqli"  # default
+            best_ev_score = 0.0
+            for ev in self.blackboard.evidence:
+                if ev.score > best_ev_score and ev.route != "source_leak":
+                    best_ev_score = ev.score
+                    best_route = ev.route
+
+            from .route_state_machine import RouteResult as _RR
+            dummy_result = _RR(
+                route=best_route,
+                status="failed",
+                best_evidence_score=best_ev_score,
+                steps_executed=0,
+                stop_reason="all_routes_exhausted",
+            )
+            llm_flag = self.exploit._llm_fallback(best_route, dummy_result)
+            if llm_flag:
+                action_log.append({
+                    "round": max_rounds + 1,
+                    "phase": "llm_fallback",
+                    "agent": "exploit",
+                    "result_summary": f"LLM fallback found flag: {llm_flag[:40]}",
+                })
+                return True, llm_flag, action_log
+
         # Return highest-confidence candidate flag if any exist
         if self.blackboard.candidate_flags:
             best_candidate = max(
