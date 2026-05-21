@@ -1,193 +1,313 @@
-# AutoPenX — LLM 驱动的全自动渗透测试系统
+# AutoPenX — LLM 驱动的全自动 CTF Web 解题 & 渗透测试系统
 
-> AutoPenX (Automated Penetration Testing with AI eXpertise)  
-> **LLM 大脑 + 状态机骨架 + 模块化工具集** 的三层架构实现。
-
-本项目是《Web 安全与渗透测试》课程设计的完整 MVP，严格按照 [`ai.md`](../../Desktop/ai.md) 会议纪要确定的最终方案实现：单一 LLM（DeepSeek V3）作为决策引擎、PTES 五阶段有限状态机作为流程骨架、纯 Python 实现的可插拔工具集作为执行手段，并提供 CLI 与 FastAPI Web UI 两种使用方式。
+> **三阶段混合求解架构**：确定性多智能体路线状态机 → 并行 LLM 竞速 → 顺序 ReAct 推理，实现零 API 开销快速解题 + LLM 深度推理兜底。
 
 ---
 
-## ✨ 亮点
+## 系统架构总览
 
-- **LLM 决策 + ReAct 循环**：每个状态内，LLM 基于当前 findings 快照决定下一步调用哪个工具、传什么参数、何时进入下一状态；无 API key 时自动退回确定性规则引擎，课程演示不依赖外网。
-- **有限状态机流程控制**：`INIT → RECON → SCAN → VULN_DETECT → EXPLOIT → REPORT → DONE`，每状态有最大迭代次数保护，全局 `StateFindings` 存储贯通全流程。
-- **模块化工具集**（11 个纯 Python 工具）：端口扫描、Web 指纹、子域枚举、敏感文件扫描、目录爆破、爬虫、SQLi/XSS/SSRF/CMDi 检测、SQLi 利用；全部继承 `BaseTool`，通过 `ToolRegistry` 注册、自动向 LLM 暴露 OpenAI 兼容 function schema。
-- **跨平台运行**：所有扫描基于 `requests` / `asyncio` / `aiohttp` / `BeautifulSoup`，Windows、Linux、macOS 原生运行，无需 Kali 或 WSL。
-- **双入口**：
-  - `python autopnex.py --target <url>` — CLI，终端实时进度 + Markdown/HTML 报告。
-  - `uvicorn autopnex.web.api:app` — FastAPI Web UI，实时 SSE 日志流 + 报告内嵌预览。
-- **自动报告**：Jinja2 模板渲染 Markdown，LLM 可选生成执行摘要（离线时用规则模板兜底），markdown 包转 HTML 带样式。
+```
+┌─────────────────────────────────────────────────────────────┐
+│  CTFReActAgent.solve(multi_agent=True)                      │
+│                                                             │
+│  Phase 1: MultiAgentOrchestrator (确定性, 0 API 开销)       │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │ ReconAgent → 指纹识别 → 路线证据收集                  │    │
+│  │ CoordinatorAgent → 选择最优路线                       │    │
+│  │ ExploitAgent → RouteStateMachine → flag?             │    │
+│  │ CriticAgent → 重复检测 + 路线切换                     │    │
+│  │ KnowledgeLearner → 匹配已知模式                      │    │
+│  └─────────────────────────────────────────────────────┘    │
+│                                                             │
+│  Phase 2: Parallel LLM Racing (3 workers × 5 turns)         │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │ Worker 1 (DeepSeek): SQLi + auth 方向                │    │
+│  │ Worker 2 (OpenAI):   LFI + SSTI 方向                 │    │
+│  │ Worker 3 (Claude):   CMDi + upload 方向              │    │
+│  │ 首个找到 flag 的 worker 胜出 → 取消其他               │    │
+│  └─────────────────────────────────────────────────────┘    │
+│                                                             │
+│  Phase 3: Sequential LLM ReAct (剩余预算)                   │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │ 完整工具集: http_request, run_python,                 │    │
+│  │ repl_execute, scan_flag, file_analyze 等              │    │
+│  │ 多轮推理 + 响应分析                                   │    │
+│  └─────────────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────────┘
+```
 
 ---
 
-## 🗂️ 目录结构
+## ✨ 核心特性
 
-```
-AutoPenX/
-├── autopnex.py                  # CLI 入口
-├── autopnex/
-│   ├── orchestrator/            # DeepSeek 客户端、prompts、ReAct 循环、离线 MockBrain
-│   ├── state_machine/           # PenTestStateMachine + StateFindings
-│   ├── tools/                   # BaseTool + 11 个具体工具
-│   │   ├── recon/  scan/  vuln/  exploit/
-│   ├── knowledge_base/          # 漏洞指纹/payload 库 + 词表
-│   ├── report/                  # Jinja2 模板 + 报告生成器
-│   └── web/                     # FastAPI + 前端单页 (SSE 实时进度)
-├── config/settings.py           # .env 配置加载
-├── tests/                       # pytest 单测 + 集成测试（内置假靶场）
-└── requirements.txt
-```
+- **三阶段混合求解**：Phase 1 确定性路线（零 API 开销）→ Phase 2 并行 LLM 竞速 → Phase 3 顺序 ReAct 深度推理
+- **15 条路线状态机**：source_leak, lfi, ssti, sqli, cmdi, jwt, upload, php_pop, ssrf, idor, xss, graphql, websocket, xxe, auth_logic
+- **多智能体协作**：Coordinator / Recon / Exploit / Critic 四角色，通过 Blackboard 共享状态
+- **12 种 LLM 工具**：http_request, run_python, repl_execute, scan_flag, decode_data, file_analyze, recon_scan, ctf_knowledge_search, write_tool_script, run_tool_script, install_python_package, download_tool_url
+- **自进化知识库**：成功解题后自动提取模式，下次遇到相似题目直接命中
+- **多模型支持**：DeepSeek / OpenAI / Claude 并行竞速，首个出 flag 即停
+- **Flag 检测管线**：正则 → 启发式 → AI 验证，三级过滤减少误报
+- **Web UI**：FastAPI + SSE 实时流式展示解题过程
+- **30 个真实 CTF 靶场**：基于 BUUCTF 经典题目的本地复现
+- **12 个严格基准测试**：覆盖所有主要漏洞类型
 
 ---
 
 ## 🚀 快速开始
 
-### Windows 推荐方式（一键脚本）
+### 环境要求
 
-1. 双击 `安装依赖.bat`，初始化 `.venv`、安装依赖并创建 `.env`
-2. 双击 `一键启动Web界面.bat`，启动 Web UI；脚本会自动打开浏览器
-3. 或双击 `一键扫描.bat`，启动命令行扫描；若 `.env` 中存在有效 `DEEPSEEK_API_KEY`，默认使用 DeepSeek，否则自动回退到 `--mock`
+- Python 3.10+
+- Windows / Linux / macOS
 
-### 手动方式（PowerShell）
+### 安装
 
 ```powershell
-# Windows PowerShell
+# 克隆项目
 cd C:\Users\86181\Desktop\AutoPenX
+
+# 创建虚拟环境
 python -m venv .venv
-.venv\Scripts\Activate.ps1
+.venv\Scripts\Activate.ps1   # Windows PowerShell
+# source .venv/bin/activate  # Linux/macOS
+
+# 安装依赖
 pip install -r requirements.txt
-copy .env.example .env   # 填入 DEEPSEEK_API_KEY 后即可启用真实 LLM
+
+# 配置环境变量
+copy .env.example .env
+# 编辑 .env，填入 DEEPSEEK_API_KEY
 ```
 
-### 方式 A — CLI
+### Windows 一键脚本
+
+- `安装依赖.bat` — 初始化虚拟环境 + 安装依赖
+- `一键启动Web界面.bat` — 启动 Web UI 并自动打开浏览器
+- `一键扫描.bat` — 命令行模式扫描
+
+### 运行 CTF 解题
 
 ```powershell
-# 离线规则模式（不需要 API key，适合演示 / 跑通流程）
-python autopnex.py --target http://testphp.vulnweb.com --mock --yes
+# 多智能体模式（推荐）
+python run_ctf_solve.py
 
-# LLM 模式（需 .env 中配置有效的 DEEPSEEK_API_KEY，且不要加 --mock）
-python autopnex.py --target http://testphp.vulnweb.com
+# 或直接指定目标
+python -c "
+import asyncio
+from autopnex.ctf.react_agent import CTFReActAgent
+from config.settings import settings
+
+agent = CTFReActAgent(
+    target='http://target-url:port',
+    challenge_type='web',
+    max_iterations=30,
+    multi_agent=True,
+    runtime_config=settings.snapshot(),
+)
+result = asyncio.run(agent.solve())
+print(f'Flag: {result.get(\"flag\")}')
+"
 ```
 
-输出：
-- `reports/<timestamp>.md` — Markdown 报告
-- `reports/<timestamp>.html` — 排版好的 HTML 报告
-- 可选 `--json <path>` 同时导出原始 findings JSON
-
-常用参数：
-
-| 参数 | 说明 |
-|------|------|
-| `--target` / `-t` | 目标 URL 或主机 (**必填**) |
-| `--mock` | 强制使用离线规则引擎（不调用 LLM） |
-| `--max-iter N` | 每个状态的最大迭代次数（默认 6） |
-| `--out path.md` | 指定 Markdown 输出路径 |
-| `--html path.html` | 指定 HTML 输出路径 |
-| `--json path.json` | 额外导出原始 findings JSON |
-| `--yes` / `-y` | 跳过授权交互确认（适合脚本化） |
-
-### 方式 B — Web UI
+### 启动 Web UI
 
 ```powershell
 .venv\Scripts\python -m uvicorn autopnex.web.api:app --reload --host 127.0.0.1 --port 8000
 ```
 
-浏览器打开 <http://127.0.0.1:8000/>，输入目标 URL，实时查看：
+浏览器打开 http://127.0.0.1:8000/
 
-1. 当前状态高亮（RECON → SCAN → VULN_DETECT → EXPLOIT → REPORT → DONE）
-2. SSE 推送的工具调用流水与 LLM 推理摘要
-3. 发现的漏洞列表（按严重度排序）
-4. 内嵌的 HTML 报告预览
-
----
-
-## 🧪 运行测试
+### 传统渗透测试模式
 
 ```powershell
-pytest
+# LLM 模式
+python autopnex.py --target http://testphp.vulnweb.com
+
+# 离线规则模式（无需 API key）
+python autopnex.py --target http://testphp.vulnweb.com --mock --yes
 ```
-
-测试覆盖：
-
-- `test_tool_registry.py` — 验证 11 个工具全部注册、schema 合法
-- `test_findings.py` — `StateFindings` 去重、排序
-- `test_orchestrator_mock.py` — 离线 MockBrain 的 ReAct 决策序列
-- `test_state_machine.py` — 在进程内假靶场上端到端跑完整流水线 + 生成报告
-- `test_tools_sqli.py` — 对进程内假 SQLi 站点验证 `sqli_detect`
 
 ---
 
-## 🧠 系统架构（对应设计方案）
+## 🧪 运行基准测试
 
+```powershell
+# 严格 12 目标基准测试（确定性路线，无需 API key）
+pytest tests/benchmark/test_web_benchmark.py -v
+
+# 30 目标真实 CTF 基准测试
+pytest tests/benchmark/test_real_ctf.py -v
+
+# 探索模式（21 目标，测试路线覆盖广度）
+pytest tests/benchmark/test_web_benchmark_explore.py -v
+
+# 全部单元测试
+pytest tests/ -v --ignore=tests/benchmark
+
+# 冒烟测试（快速验证核心功能）
+pytest tests/benchmark/test_web_benchmark_smoke.py -v
 ```
-┌───────────────────────────────────────────┐
-│        LLM Orchestrator (DeepSeek)        │
-│     Planner · Reasoner · Analyzer         │
-└──────────────────┬────────────────────────┘
-                   │  Function Calling
-┌──────────────────┴────────────────────────┐
-│   PenTestStateMachine (RECON → REPORT)    │
-└──────────────────┬────────────────────────┘
-                   │
-┌──────────────────┴────────────────────────┐
-│   Tool Manager (BaseTool / ToolRegistry)  │
-│   recon · scan · vuln · exploit · report  │
-└──────────────────┬────────────────────────┘
-                   │
-┌──────────────────┴────────────────────────┐
-│       Knowledge Base (patterns + wordlist)│
-└───────────────────────────────────────────┘
-```
-
-### 工具清单（全部纯 Python）
-
-| 阶段 | 工具名 | 功能 |
-|------|--------|------|
-| RECON | `port_scan` | asyncio TCP 端口扫描 + banner 抓取 |
-| RECON | `tech_detect` | HTTP header + Cookie + HTML 指纹识别 |
-| RECON | `subdomain_find` | 通过 crt.sh 被动枚举子域名 |
-| SCAN | `web_scan` | Nikto 风格敏感文件 + 安全响应头检查 |
-| SCAN | `dir_buster` | aiohttp 异步目录爆破 |
-| SCAN | `crawl` | 同源 BFS 爬虫，抽取页面/表单/参数 |
-| VULN | `sqli_detect` | 错误/布尔/时延三路 SQL 注入检测 |
-| VULN | `xss_detect` | 反射 XSS payload 回显检查 |
-| VULN | `ssrf_detect` | 内网 URL 注入 + 响应差异分析 |
-| VULN | `cmdi_detect` | 时延型命令注入检测 |
-| EXPLOIT | `sqli_exploit` | UNION SELECT PoC 抽取 DB 信息 |
 
 ---
 
-## 📊 对应评分标准
+## 🗂️ 项目结构
 
-| 评分项 | 分值 | 对应实现 |
-|--------|------|----------|
-| 系统架构 | 10 | 三层分离：Orchestrator / StateMachine / Tools，各自独立可替换 |
-| 全智能实现机制 | 15 | LLM 基于 findings 快照 ReAct 决策，状态机内每次迭代向 LLM 暴露工具 schema |
-| 关键代码实现 | 15 | 每个模块保持单一职责，工具基类抽象清晰，规则/LLM 双模式支持 |
-| 测试效果 | 10 | pytest 内置假靶场做端到端集成测试，运行 `pytest` 即可复现 |
-| 运行流程展示 | 10 | Web UI 的 SSE 流实时展示每个状态与每次工具调用 |
-| 演示效果 | 15 | 报告生成带 LLM 执行摘要；离线模式也能完整演示 |
-| 报告规范性 | 5 | Jinja2 模板 + Markdown + HTML 双输出 |
+```
+AutoPenX/
+├── autopnex/
+│   ├── ctf/                          # CTF 解题核心引擎
+│   │   ├── multi_agent.py            # 多智能体编排器 + 4 个 Agent
+│   │   ├── route_state_machine.py    # 13 条路线状态机 + 工厂
+│   │   ├── routes/                   # 模块化路线包（15 个路线文件）
+│   │   │   ├── source_leak.py        # 源码泄露路线
+│   │   │   ├── lfi.py                # 本地文件包含
+│   │   │   ├── ssti.py               # 模板注入
+│   │   │   ├── sqli.py               # SQL 注入
+│   │   │   ├── cmdi.py               # 命令注入
+│   │   │   ├── jwt.py                # JWT 伪造
+│   │   │   ├── upload.py             # 文件上传
+│   │   │   ├── php_pop.py            # PHP 反序列化
+│   │   │   ├── ssrf.py               # SSRF
+│   │   │   ├── idor.py               # 越权访问
+│   │   │   ├── xss.py                # XSS
+│   │   │   ├── graphql.py            # GraphQL 注入
+│   │   │   ├── websocket.py          # WebSocket 绕过
+│   │   │   ├── xxe.py                # XXE 注入
+│   │   │   └── auth_logic.py         # 认证逻辑绕过
+│   │   ├── react_agent.py            # CTFReActAgent（LLM ReAct 循环）
+│   │   ├── tool_router.py            # 工具定义 + 执行网关
+│   │   ├── web_state_blackboard.py   # 共享状态黑板
+│   │   ├── knowledge_learner.py      # 自进化知识学习器
+│   │   ├── flag_engine.py            # Flag 检测引擎
+│   │   ├── prompt_compiler.py        # Prompt 编译器
+│   │   ├── workers.py                # 并行 LLM Worker
+│   │   └── ...
+│   ├── orchestrator/                 # LLM 客户端层
+│   │   ├── llm_client.py             # DeepSeek/OpenAI 兼容客户端
+│   │   ├── mock_brain.py             # 离线规则引擎
+│   │   └── orchestrator.py           # 传统渗透编排器
+│   ├── tools/                        # 工具集
+│   │   ├── recon/                    # 侦察工具
+│   │   ├── scan/                     # 扫描工具
+│   │   ├── vuln/                     # 漏洞检测
+│   │   ├── exploit/                  # 利用工具
+│   │   ├── ctf_web/                  # CTF Web 专用工具
+│   │   └── ctf_crypto/              # CTF Crypto 工具
+│   ├── web/                          # Web UI
+│   │   ├── api.py                    # FastAPI 后端 + SSE
+│   │   └── static/                   # 前端静态文件
+│   ├── state_machine/                # PTES 状态机
+│   ├── evasion/                      # WAF 绕过引擎
+│   └── knowledge_base/               # 漏洞指纹/payload 库
+├── tests/
+│   ├── benchmark/
+│   │   ├── test_web_benchmark.py     # 严格 12 目标基准
+│   │   ├── test_real_ctf.py          # 30 目标真实 CTF
+│   │   ├── challenges.py             # 靶场实现
+│   │   └── real_ctf_targets.py       # 真实 CTF 目标注册
+│   └── ctf/                          # CTF 引擎单元测试
+├── config/
+│   └── settings.py                   # 配置管理
+├── run_ctf_solve.py                  # CTF 解题 CLI 入口
+├── autopnex.py                       # 传统渗透 CLI 入口
+├── ctf_knowledge.json                # 自进化知识库
+├── .env                              # 环境变量配置
+└── requirements.txt                  # Python 依赖
+```
 
 ---
 
-## 👥 团队分工（建议）
+## ⚙️ 配置说明
 
-- **组长**：`orchestrator/`、`state_machine/`、总集成、Prompt 工程
-- **成员 2**：`tools/recon/*` + `tools/scan/*`
-- **成员 3**：`tools/vuln/*` + `tools/exploit/*`
-- **成员 4**：`knowledge_base/`、`report/`、`web/` 前端、基准集测试
+### `.env` 环境变量
+
+```bash
+# ---- 必填：主 LLM ----
+DEEPSEEK_API_KEY=sk-xxx              # DeepSeek API Key
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+DEEPSEEK_MODEL=deepseek-chat
+
+# ---- 可选：多模型并行 ----
+OPENAI_API_KEY=                       # OpenAI API Key（Worker 2）
+OPENAI_BASE_URL=https://api.openai.com/v1
+OPENAI_MODEL=gpt-4o
+CLAUDE_API_KEY=                       # Claude API Key（Worker 3）
+CLAUDE_BASE_URL=https://api.anthropic.com/v1
+CLAUDE_MODEL=claude-sonnet-4-20250514
+
+# ---- 运行时配置 ----
+AUTOPENX_SCAN_MODE=active             # passive | active
+AUTOPENX_MAX_ITER_PER_STATE=6         # 每状态最大迭代
+AUTOPENX_HTTP_TIMEOUT=8               # HTTP 超时秒数
+AUTOPENX_REQUEST_DELAY=0.0            # 请求间隔（秒）
+
+# ---- WAF 绕过 ----
+AUTOPENX_EVASION_ENABLED=false        # 启用绕过引擎
+AUTOPENX_WAF_BYPASS_LEVEL=none        # none | light | aggressive
+
+# ---- CTF 工具管理 ----
+AUTOPENX_CTF_AUTO_TOOLING_ENABLED=true   # 允许 LLM 写脚本
+AUTOPENX_CTF_TOOL_INSTALL_ENABLED=true   # 允许 pip install
+AUTOPENX_CTF_WORKSPACE_DIR=ctf_workspace # 工作目录
+```
+
+---
+
+## 🔧 如何扩展
+
+### 添加新路线
+
+1. 在 `autopnex/ctf/routes/` 下创建新文件（如 `nosql.py`）
+2. 继承 `RouteStateMachine`，实现 `preconditions_met()`, `get_probes()`, `score_evidence()`, `get_exploit_steps()`
+3. 在 `autopnex/ctf/routes/registry.py` 中注册
+4. 在 `CoordinatorAgent.ROUTE_PRIORITY` 中添加优先级
+
+### 添加新 CTF 靶场
+
+1. 在 `tests/benchmark/real_ctf_targets.py`（或 `_real_ctf_extra.py`）中添加新 Target 类
+2. 实现 `start()`, `stop()`, `url`, `flag`, `name`, `category` 属性
+3. 在 `REAL_CTF_TARGETS` 字典中注册
+
+### 添加新 LLM 工具
+
+1. 在 `autopnex/ctf/tool_router.py` 的 `TOOL_DEFINITIONS` 列表中添加 OpenAI function schema
+2. 在 `ToolRouter.execute()` 方法中添加对应的执行分支
+3. 将工具名加入 `CORE_TOOL_NAMES` 集合
+
+---
+
+## 📊 当前能力
+
+| 指标 | 数值 |
+|------|------|
+| 严格基准通过率 | 12/12 (100%) |
+| 真实 CTF 通过率 | 30/30 (100%) |
+| 支持路线数 | 15 |
+| LLM 工具数 | 12 |
+| 平均解题轮次 | ~5 轮 |
+| 平均解题时间 | ~1.5s（本地靶场） |
+
+### 覆盖的漏洞类型
+
+SQL 注入、文件包含(LFI)、模板注入(SSTI)、命令注入(CMDi)、JWT 伪造、文件上传、PHP 反序列化、SSRF、IDOR 越权、XSS、GraphQL 注入、WebSocket 绕过、XXE 注入、认证逻辑绕过、源码泄露
+
+---
+
+## 🛠️ 技术栈
+
+| 层级 | 技术 |
+|------|------|
+| 语言 | Python 3.12 |
+| LLM | DeepSeek V3 / GPT-4o / Claude (OpenAI 兼容协议) |
+| Web 框架 | FastAPI + Uvicorn |
+| HTTP 客户端 | requests + aiohttp |
+| 测试框架 | pytest + hypothesis |
+| 前端 | 原生 HTML/JS + SSE |
+| 配置 | python-dotenv |
+| 模板 | Jinja2 |
 
 ---
 
 ## ⚠️ 法律与授权
 
-本工具仅用于教学与授权测试。对未授权系统使用属于违法行为，任何后果由使用者自行承担。CLI 启动时会强制要求确认授权；Web UI 首页会显示警示文字。
-
-## 🛣️ 后续可扩展方向
-
-- 真实 `nmap` / `sqlmap` / `nikto` / `ffuf` 作为可选 backend
-- 在 `Orchestrator` 上接入 Anthropic Claude / OpenAI GPT-4o provider
-- 持久化 `StateFindings` 至 SQLite，做历史对比与增量扫描
-- `asyncio` 并行工具调度（`ToolManager.execute_many`）
-- 基于 xbow-validation-benchmarks 的基准集自动化测试与覆盖率统计
+本工具仅用于教学、CTF 竞赛和授权渗透测试。对未授权系统使用属于违法行为，任何后果由使用者自行承担。
