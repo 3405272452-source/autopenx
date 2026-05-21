@@ -555,3 +555,10 @@ REAL_CTF_TARGETS = {
     "geek2019_php": PHPUnserializeTarget,
     "suctf2019_easysql": StackedSQLTarget,
 }
+
+# Additional targets loaded from _extra module
+try:
+    from tests.benchmark._real_ctf_extra import EXTRA_CTF_TARGETS
+except ImportError:
+    from ._real_ctf_extra import EXTRA_CTF_TARGETS
+REAL_CTF_TARGETS.update(EXTRA_CTF_TARGETS)
