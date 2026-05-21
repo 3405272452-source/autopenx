@@ -70,6 +70,8 @@ def script_execute(code: str, timeout: int = 30) -> dict:
             timeout=timeout,
             env=env,
             cwd=tempfile.gettempdir(),
+            encoding="utf-8",
+            errors="replace",
         )
 
         result["stdout"] = proc.stdout

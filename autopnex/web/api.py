@@ -498,6 +498,7 @@ async def ctf_solve(req: CTFSolveRequest):
             enabled_tools=req.enabled_tools,
             runtime_config=runtime,
             knowledge_base_path=str(Path(__file__).parent.parent.parent / "ctf_knowledge.json"),
+            multi_agent=True,  # Hybrid: deterministic routes first, then LLM ReAct fallback
         )
 
         # Add uploaded files
@@ -570,6 +571,7 @@ async def ctf_solve_events(req: CTFSolveRequest):
                 runtime_config=runtime,
                 progress_callback=push,
                 knowledge_base_path=str(Path(__file__).parent.parent.parent / "ctf_knowledge.json"),
+                multi_agent=True,  # Hybrid: deterministic routes first, then LLM ReAct fallback
             )
             for fpath in req.files:
                 agent.add_file(fpath)
