@@ -1037,38 +1037,77 @@ class CTFReActAgent:
         """
         from .multi_agent import MultiAgentOrchestrator
 
+        # Emit progress so Web UI knows Phase 1 is starting
+        self._emit(
+            "ctf_iteration_start",
+            iteration=0,
+            max_iterations=self.max_iterations,
+            phase="deterministic",
+            message="Running deterministic exploit routes (Phase 1)...",
+        )
+
         # Phase 1: Deterministic multi-agent (fast path)
+        # Use a conservative round limit and time cap to avoid blocking the UI
+        phase1_rounds = min(self.max_iterations, 15)
+        phase1_timeout = min(60, self.timeout // 3)  # Max 60s or 1/3 of total timeout
         orch = MultiAgentOrchestrator(
             target_url=self.target,
             flag_format=self.flag_format,
-            max_rounds=min(self.max_iterations, 15),
+            max_rounds=phase1_rounds,
             session=self._session,
         )
-        found, flag, action_log = orch.run_loop(max_rounds=min(self.max_iterations, 15))
+
+        try:
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(orch.run_loop, max_rounds=phase1_rounds)
+                found, flag, action_log = future.result(timeout=phase1_timeout)
+        except concurrent.futures.TimeoutError:
+            log.warning("Phase 1 timed out after %ds", phase1_timeout)
+            found, flag, action_log = False, None, []
+        except Exception as e:
+            log.warning("MultiAgentOrchestrator crashed: %s", e)
+            found, flag, action_log = False, None, []
+
+        # Emit Phase 1 completion
+        phase1_rounds_used = len(set(e.get("round", 0) for e in action_log))
+        self._emit(
+            "ctf_tool_finish",
+            iteration=0,
+            tool="multi_agent_orchestrator",
+            arguments={"routes_tried": phase1_rounds_used},
+            result_preview=f"Phase 1 complete: {'flag found' if found else 'no flag'}, {phase1_rounds_used} rounds",
+        )
 
         if found and flag:
             duration_ms = int((time.time() - start_time) * 1000)
-            iterations = len(set(e.get("round", 0) for e in action_log))
             self._steps = action_log
-            self._emit("ctf_flag_found", flag=flag, iterations=iterations)
+            self._emit("ctf_flag_found", flag=flag, iterations=phase1_rounds_used)
             return self._result(
                 success=True,
                 flag=flag,
-                reasoning=f"Multi-Agent deterministic: flag found",
+                reasoning=f"Multi-Agent deterministic: flag found in {phase1_rounds_used} rounds",
                 duration_ms=duration_ms,
             )
 
         # Phase 2: LLM ReAct fallback with remaining budget
         elapsed = time.time() - start_time
         remaining_time = self.timeout - elapsed
-        remaining_iters = max(5, self.max_iterations - len(action_log))
+        remaining_iters = max(5, self.max_iterations - phase1_rounds_used)
 
         if remaining_time < 30:
             # Not enough time for LLM fallback
             duration_ms = int(elapsed * 1000)
+            self._emit(
+                "ctf_tool_finish",
+                iteration=0,
+                tool="timeout_check",
+                arguments={},
+                result_preview=f"No time for LLM fallback (remaining: {remaining_time:.0f}s)",
+            )
             return self._result(
                 success=False,
-                reasoning=f"Multi-Agent exhausted {len(action_log)} rounds, no time for LLM fallback",
+                reasoning=f"Multi-Agent exhausted {phase1_rounds_used} rounds, no time for LLM fallback",
                 duration_ms=duration_ms,
                 error="flag_not_found",
             )
@@ -1076,9 +1115,14 @@ class CTFReActAgent:
         log.info(
             "Multi-Agent failed after %d rounds. Falling back to LLM ReAct "
             "(remaining: %d iters, %.0fs)",
-            len(action_log), remaining_iters, remaining_time,
+            phase1_rounds_used, remaining_iters, remaining_time,
         )
-        self._emit("ctf_multi_agent_fallback", reason="deterministic_routes_exhausted")
+        self._emit(
+            "ctf_multi_agent_fallback",
+            reason="deterministic_routes_exhausted",
+            remaining_iters=remaining_iters,
+            remaining_time=int(remaining_time),
+        )
 
         # Inject blackboard context into LLM messages so it knows what was tried
         bb_summary = orch.get_state_summary()
