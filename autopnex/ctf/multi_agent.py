@@ -303,6 +303,16 @@ class CoordinatorAgent(BaseAgent):
             if route_name == "recon":
                 continue
 
+            # Fix 3: Suppress source_leak when another route has strong evidence
+            if route_name == "source_leak":
+                has_strong_evidence = any(
+                    ev.get("score", 0) >= 0.7
+                    for ev in evidence_list
+                    if ev.get("route") not in ("source_leak", "recon")
+                )
+                if has_strong_evidence:
+                    continue
+
             score = 0.0
 
             # Base score from route priority
@@ -411,6 +421,9 @@ class CoordinatorAgent(BaseAgent):
         elif status == "failed":
             # Route failed — penalize score and track failure
             self.route_failures[route] = self.route_failures.get(route, 0) + 1
+            # source_leak one-shot: never retry after first failure
+            if route == "source_leak":
+                self.route_failures[route] = 5
             self.budget_remaining -= 1
 
         elif status == "inconclusive":
@@ -617,6 +630,10 @@ class ReconAgent(BaseAgent):
                             observation=f".env file accessible ({len(text)} bytes)",
                         )
 
+                    # --- Route fingerprinting from response content ---
+                    if path == "/":
+                        self._fingerprint_route_hints(text, text_lower, resp)
+
             except requests.RequestException:
                 findings.append({"path": path, "status": "error"})
 
@@ -672,6 +689,70 @@ class ReconAgent(BaseAgent):
                     )
             except Exception:
                 pass
+
+    def _fingerprint_route_hints(self, text: str, text_lower: str, resp) -> None:
+        """Detect strong route signals from the homepage response.
+
+        Adds high-score evidence (0.85) for routes that have clear fingerprints,
+        so the Coordinator skips irrelevant routes and goes directly to the
+        correct exploit on round 2.
+        """
+        import re
+
+        headers = resp.headers
+
+        # GraphQL: page mentions /graphql endpoint
+        if "/graphql" in text_lower or "graphql" in text_lower:
+            self.blackboard.add_evidence(
+                route="graphql", score=0.85, source="recon_fingerprint",
+                observation="GraphQL endpoint referenced on homepage",
+            )
+
+        # JWT: Set-Cookie contains eyJ (base64 JWT header)
+        set_cookie = headers.get("Set-Cookie", "")
+        if "eyJ" in set_cookie:
+            self.blackboard.add_evidence(
+                route="jwt", score=0.85, source="recon_fingerprint",
+                observation="JWT token in Set-Cookie header",
+            )
+
+        # WebSocket: page mentions /ws/ or websocket connect endpoint
+        if "/ws/" in text_lower or "ws/connect" in text_lower or "websocket" in text_lower:
+            self.blackboard.add_evidence(
+                route="websocket", score=0.85, source="recon_fingerprint",
+                observation="WebSocket endpoint referenced on homepage",
+            )
+
+        # XSS: admin bot link present
+        if "/admin/bot" in text_lower or "/admin/read" in text_lower:
+            self.blackboard.add_evidence(
+                route="xss", score=0.85, source="recon_fingerprint",
+                observation="Admin bot/review endpoint found (XSS chain)",
+            )
+
+        # SQLi: SQL error keywords in response
+        sql_signals = ["sql", "sqlite", "mysql", "syntax error", "query()", "prepare statement"]
+        if any(sig in text_lower for sig in sql_signals):
+            self.blackboard.add_evidence(
+                route="sqli", score=0.85, source="recon_fingerprint",
+                observation="SQL-related keywords in response",
+            )
+
+        # SQLi: search/product/profile pages strongly suggest DB-backed app
+        db_page_signals = ["search results", "no products found", "user id", "profile"]
+        if any(sig in text_lower for sig in db_page_signals):
+            self.blackboard.add_evidence(
+                route="sqli", score=0.80, source="recon_fingerprint",
+                observation="Database-backed page detected (search/profile)",
+            )
+
+        # CMDi: ping/network tool pages suggest command injection
+        cmdi_signals = ["ping tool", "network tool", "traceroute", "nslookup", "pinging"]
+        if any(sig in text_lower for sig in cmdi_signals):
+            self.blackboard.add_evidence(
+                route="cmdi", score=0.85, source="recon_fingerprint",
+                observation="Network/ping tool detected (command injection likely)",
+            )
 
     def _follow_interesting_links(self) -> Dict[str, Any]:
         """Follow links discovered during scan that might contain flags directly.
