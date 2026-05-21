@@ -221,11 +221,17 @@ def test_real_ctf(real_target):
 
 
 def _write_coverage_report(results: Dict[str, Dict[str, Any]], report_dir: Path) -> None:
-    """Write scenario coverage report mapping each target to pass/fail."""
-    scenario_coverage: Dict[str, str] = {}
+    """Write scenario coverage report mapping each target to pass/fail with attribution."""
+    scenario_coverage: Dict[str, Dict[str, Any]] = {}
     for target_id, result in results.items():
         scenario = _TARGET_SCENARIO_MAP.get(target_id, f"unknown.{target_id}")
-        scenario_coverage[scenario] = "pass" if result["success"] else "fail"
+        actual = "pass" if result["success"] else "fail"
+        attribution = result.get("attribution", "deterministic")
+        scenario_coverage[scenario] = {
+            "expected": True,
+            "actual": actual,
+            "attribution": attribution,
+        }
 
     coverage = {"scenario_coverage": scenario_coverage}
     coverage_path = report_dir / "coverage_report.json"

@@ -263,6 +263,27 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "repl_execute",
+            "description": (
+                "Execute Python code in a persistent REPL that maintains variable "
+                "state between calls. Use for multi-step exploits where you need to "
+                "keep session/cookies/variables alive."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "code": {
+                        "type": "string",
+                        "description": "Python code to execute in the persistent REPL.",
+                    },
+                },
+                "required": ["code"],
+            },
+        },
+    },
 ]
 
 CORE_TOOL_NAMES = {
@@ -277,6 +298,7 @@ CORE_TOOL_NAMES = {
     "install_python_package",
     "download_tool_url",
     "recon_scan",
+    "repl_execute",
 }
 
 DEFAULT_CTF_TOOL_NAMES = {
@@ -614,6 +636,14 @@ class ToolRouter:
                 recon = ReconModule(session=self.session, base_url=url)
                 surface = recon.scan()
                 return surface.to_dict()
+            elif name == "repl_execute":
+                from ..tools.ctf_web.python_repl import PersistentREPL
+                if not hasattr(self, "_repl"):
+                    self._repl = PersistentREPL()
+                code = args.get("code", "")
+                if not code.strip():
+                    return {"error": "No code provided", "success": False, "stdout": "", "stderr": "", "variables": []}
+                return self._repl.execute(code)
             elif ToolRegistry.get(name):
                 registry_args = self.normalise_registry_args(name, args)
                 result = ToolRegistry.execute(name, registry_args, runtime_config=self.runtime_config)
