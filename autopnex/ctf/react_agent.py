@@ -1031,7 +1031,8 @@ class CTFReActAgent:
         Strategy:
           1. Run deterministic state machine routes (fast, zero API cost)
           2. If flag found → return immediately
-          3. If not found → fall back to full LLM ReAct loop with remaining budget
+          3. Phase 1.5: Parallel LLM race (3 workers × 5 turns each)
+          4. If not found → fall back to full LLM ReAct loop with remaining budget
              The LLM gets the blackboard state as context so it doesn't repeat
              what the state machine already tried.
         """
@@ -1047,15 +1048,17 @@ class CTFReActAgent:
         )
 
         # Phase 1: Deterministic multi-agent (fast path)
-        # Use a conservative round limit and time cap to avoid blocking the UI
-        phase1_rounds = min(self.max_iterations, 15)
+        # Dynamic round budget based on evidence strength after recon
         phase1_timeout = min(60, self.timeout // 3)  # Max 60s or 1/3 of total timeout
         orch = MultiAgentOrchestrator(
             target_url=self.target,
             flag_format=self.flag_format,
-            max_rounds=phase1_rounds,
+            max_rounds=15,
             session=self._session,
         )
+
+        # Dynamic budget: run recon first, then decide rounds
+        phase1_rounds = self._compute_dynamic_rounds(orch)
 
         try:
             import concurrent.futures
@@ -1089,6 +1092,24 @@ class CTFReActAgent:
                 reasoning=f"Multi-Agent deterministic: flag found in {phase1_rounds_used} rounds",
                 duration_ms=duration_ms,
             )
+
+        # Phase 1.5: Parallel LLM race (3 workers × 5 turns each)
+        elapsed = time.time() - start_time
+        remaining_time = self.timeout - elapsed
+        if remaining_time > 45:
+            bb_summary = orch.get_state_summary()
+            top_routes = self._get_top_routes_from_evidence(orch)
+            if top_routes:
+                self._emit("ctf_parallel_race_start", routes=top_routes)
+                race_flag = self._parallel_llm_race(top_routes, bb_summary)
+                if race_flag:
+                    duration_ms = int((time.time() - start_time) * 1000)
+                    return self._result(
+                        success=True,
+                        flag=race_flag,
+                        reasoning=f"Parallel LLM race found flag via routes: {top_routes}",
+                        duration_ms=duration_ms,
+                    )
 
         # Phase 2: LLM ReAct fallback with remaining budget
         elapsed = time.time() - start_time
@@ -1127,18 +1148,65 @@ class CTFReActAgent:
         # Inject blackboard context into LLM messages so it knows what was tried
         bb_summary = orch.get_state_summary()
         tried_routes = list(bb_summary["coordinator"]["route_attempts"].keys())
+
+        # Phase 2: Parallel LLM racing (3 workers × 5 iters each)
+        # Each worker gets a different attack direction hint
+        direction_hints = [
+            "Focus on SQL injection and authentication bypass. Try stacked queries, "
+            "UNION-based injection, login form bypass, and cookie manipulation.",
+            "Focus on file inclusion, source code audit, and SSTI. Try LFI with php "
+            "filters, directory traversal, template injection, and PHP deserialization.",
+            "Focus on command injection, file upload, and SSRF. Try $IFS bypass, "
+            "backtick injection, webshell upload, and internal service access.",
+        ]
+
+        self._emit(
+            "ctf_parallel_phase2_start",
+            workers=len(direction_hints),
+            remaining_time=int(remaining_time),
+        )
+
+        phase2_flag = self._run_parallel_llm_phase2(
+            direction_hints=direction_hints,
+            tried_routes=tried_routes,
+            bb_summary=bb_summary,
+            max_iters_per_worker=5,
+            time_cap=remaining_time,
+        )
+
+        if phase2_flag:
+            duration_ms = int((time.time() - start_time) * 1000)
+            return self._result(
+                success=True,
+                flag=phase2_flag,
+                reasoning=f"Parallel LLM Phase 2 found flag after {phase1_rounds_used} deterministic rounds",
+                duration_ms=duration_ms,
+            )
+
+        # If parallel workers didn't find it, fall back to single sequential ReAct
+        elapsed = time.time() - start_time
+        remaining_time = self.timeout - elapsed
+        if remaining_time < 20:
+            duration_ms = int(elapsed * 1000)
+            return self._result(
+                success=False,
+                reasoning=f"Multi-Agent + parallel LLM exhausted, no time for sequential fallback",
+                duration_ms=duration_ms,
+                error="flag_not_found",
+            )
+
         context_msg = (
             f"[System] The deterministic exploit engine already tried these routes "
             f"without finding the flag: {', '.join(tried_routes)}.\n"
             f"Evidence collected: {bb_summary['blackboard'].get('top_evidence', [])[:3]}\n"
-            f"Now YOU must analyze the target creatively. Use http_request to interact "
-            f"with the target and run_python for complex payloads. Do NOT repeat the "
-            f"same approaches that already failed."
+            f"Parallel LLM workers also failed. Now YOU must analyze the target "
+            f"creatively. Use http_request to interact with the target and run_python "
+            f"for complex payloads. Do NOT repeat the same approaches that already failed."
         )
 
         # Switch to standard ReAct mode with reduced budget
         self.multi_agent = False  # Prevent recursion
-        self.max_iterations = remaining_iters
+        self.max_iterations = max(3, remaining_iters - 5)
         self.timeout = int(remaining_time)
 
         # Inject context before starting ReAct
@@ -1147,7 +1215,6 @@ class CTFReActAgent:
         self._messages.append({"role": "user", "content": context_msg})
 
         # Run the standard ReAct loop (this calls _call_llm iteratively)
-        # We need to re-enter solve() but without multi_agent flag
         from ..orchestrator.llm_client import LLMClient, LLMError
         try:
             self._llm = LLMClient()
@@ -1167,6 +1234,383 @@ class CTFReActAgent:
         # Restore multi_agent flag
         self.multi_agent = True
         return result
+
+    def _compute_dynamic_rounds(self, orch) -> int:
+        """Compute dynamic Phase 1 round budget based on evidence strength.
+
+        - If recon finds strong evidence for 1-2 routes → 5 rounds (fast path)
+        - If no strong evidence → 10 rounds (try more routes)
+        - Never exceed 15
+        """
+        # Run a quick recon to get initial evidence
+        try:
+            recon_decision = orch.recon.decide()
+            orch.recon.execute(recon_decision)
+            # Record the recon round
+            orch.coordinator.record_result("recon", False)
+        except Exception:
+            return 15  # Fallback to max
+
+        # Check evidence strength
+        strong_evidence = [
+            e for e in orch.blackboard.evidence
+            if e.score >= 0.7 and e.route != "recon"
+        ]
+        routes_with_strong = set(e.route for e in strong_evidence)
+
+        if len(routes_with_strong) >= 1 and len(routes_with_strong) <= 2:
+            # Strong evidence for 1-2 routes — fast path
+            return 5
+        elif not strong_evidence:
+            # No strong evidence — try more routes
+            return 10
+        else:
+            # Multiple routes with evidence — standard budget
+            return 15
+
+    def _get_top_routes_from_evidence(self, orch) -> List[str]:
+        """Get top 3 most promising routes from orchestrator evidence."""
+        evidence_by_route: Dict[str, float] = {}
+        for ev in orch.blackboard.evidence:
+            if ev.route and ev.route != "recon":
+                current = evidence_by_route.get(ev.route, 0.0)
+                evidence_by_route[ev.route] = max(current, ev.score)
+
+        # Sort by score descending, take top 3
+        sorted_routes = sorted(evidence_by_route.items(), key=lambda x: x[1], reverse=True)
+        return [r for r, s in sorted_routes[:3] if s > 0.1]
+
+    def _parallel_llm_race(self, routes: List[str], bb_summary: Dict) -> Optional[str]:
+        """Race multiple LLM workers in parallel, each trying a different route.
+
+        Each worker gets its own session and 5 iterations to find the flag.
+        First worker to find a flag wins — others are cancelled.
+        """
+        import concurrent.futures
+        import threading
+
+        from ..orchestrator.llm_client import LLMClient
+
+        cancel_event = threading.Event()
+        flag_pattern = re.compile(self.flag_format, re.IGNORECASE)
+
+        def worker(route: str) -> Optional[str]:
+            """Mini-agent worker focused on a single route."""
+            if cancel_event.is_set():
+                return None
+
+            try:
+                llm = LLMClient()
+                if not llm.enabled:
+                    return None
+            except Exception:
+                return None
+
+            worker_session = requests.Session()
+            worker_session.headers.update({"User-Agent": "AutoPenX-CTF/1.0"})
+
+            # Build route-specific prompt
+            system_prompt = (
+                f"You are a CTF exploit specialist focused on the '{route}' attack vector.\n"
+                f"Target: {self.target}\n"
+                f"Your goal: find the flag (format: {self.flag_format}).\n"
+                f"Evidence from recon: {bb_summary.get('blackboard', {}).get('top_evidence', [])[:2]}\n"
+                f"You have 5 turns. Each turn, output a JSON object with:\n"
+                f'{{"method": "GET|POST", "url": "...", "data": "...", "headers": {{}}}}\n'
+                f"Focus ONLY on {route} techniques. Be creative with payloads."
+            )
+
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": f"Start exploiting {route} on {self.target}. Output your first HTTP request as JSON."},
+            ]
+
+            for turn in range(5):
+                if cancel_event.is_set():
+                    return None
+
+                try:
+                    response = llm.chat(messages, temperature=0.7, max_tokens=500)
+                    content = response.get("content", "")
+
+                    # Try to parse HTTP request from LLM output
+                    req_data = self._parse_llm_http_request(content)
+                    if not req_data:
+                        messages.append({"role": "assistant", "content": content})
+                        messages.append({"role": "user", "content": "Invalid format. Output a valid JSON HTTP request."})
+                        continue
+
+                    # Execute the request
+                    try:
+                        method = req_data.get("method", "GET").upper()
+                        url = req_data.get("url", self.target)
+                        headers = req_data.get("headers", {})
+                        data = req_data.get("data")
+
+                        if method == "POST":
+                            resp = worker_session.post(url, data=data, headers=headers, timeout=8)
+                        else:
+                            resp = worker_session.get(url, params=req_data.get("params"), headers=headers, timeout=8)
+
+                        resp_text = resp.text[:2000]
+
+                        # Check for flag
+                        match = flag_pattern.search(resp_text)
+                        if match:
+                            cancel_event.set()
+                            return match.group(0)
+
+                        # Feed response back to LLM
+                        messages.append({"role": "assistant", "content": content})
+                        messages.append({
+                            "role": "user",
+                            "content": f"Response (HTTP {resp.status_code}, {len(resp.text)} bytes):\n{resp_text[:500]}\n\nAnalyze and try next payload.",
+                        })
+
+                    except requests.RequestException as e:
+                        messages.append({"role": "assistant", "content": content})
+                        messages.append({"role": "user", "content": f"Request failed: {e}. Try a different approach."})
+
+                except Exception:
+                    break
+
+            return None
+
+        # Launch workers in parallel
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+            futures = {executor.submit(worker, r): r for r in routes[:3]}
+            try:
+                for future in concurrent.futures.as_completed(futures, timeout=60):
+                    try:
+                        result = future.result(timeout=5)
+                        if result:
+                            cancel_event.set()
+                            return result
+                    except Exception:
+                        continue
+            except concurrent.futures.TimeoutError:
+                cancel_event.set()
+
+        return None
+
+    def _run_parallel_llm_phase2(
+        self,
+        direction_hints: List[str],
+        tried_routes: List[str],
+        bb_summary: Dict,
+        max_iters_per_worker: int = 5,
+        time_cap: float = 120.0,
+    ) -> Optional[str]:
+        """Phase 2 parallel LLM racing: launch multiple workers with different attack directions.
+
+        Each worker gets its own message history with a unique direction hint.
+        Workers share the same session (for cookie persistence) and blackboard
+        (so they don't repeat each other's failed attempts).
+        First worker to find a flag wins — others are cancelled.
+
+        Args:
+            direction_hints: List of attack direction prompts for each worker.
+            tried_routes: Routes already attempted by Phase 1.
+            bb_summary: Blackboard state summary from Phase 1.
+            max_iters_per_worker: Max iterations per worker (default 5).
+            time_cap: Total time cap for Phase 2 in seconds.
+
+        Returns:
+            Flag string if found, None otherwise.
+        """
+        import concurrent.futures
+        import threading
+
+        from ..orchestrator.llm_client import LLMClient
+
+        cancel_event = threading.Event()
+        flag_pattern = re.compile(self.flag_format, re.IGNORECASE)
+
+        def worker(direction_hint: str, worker_id: int) -> Optional[str]:
+            """LLM worker focused on a specific attack direction."""
+            if cancel_event.is_set():
+                return None
+
+            try:
+                llm = LLMClient()
+                if not llm.enabled:
+                    return None
+            except Exception:
+                return None
+
+            # Workers share the same session for cookie persistence
+            worker_session = self._session
+
+            # Build direction-specific system prompt
+            system_prompt = (
+                f"You are CTF exploit worker #{worker_id + 1}. Your attack direction:\n"
+                f"{direction_hint}\n\n"
+                f"Target: {self.target}\n"
+                f"Flag format: {self.flag_format}\n"
+                f"Routes already tried (failed): {', '.join(tried_routes)}\n"
+                f"Evidence from recon: {bb_summary.get('blackboard', {}).get('top_evidence', [])[:3]}\n\n"
+                f"You have {max_iters_per_worker} turns. Each turn, output a JSON object:\n"
+                f'{{"method": "GET|POST", "url": "full_url", "data": "body_string_or_null", '
+                f'"params": {{}}, "headers": {{}}}}\n\n'
+                f"Be creative and aggressive. Try multiple payload variations. "
+                f"Analyze each response carefully for flags, hints, or error messages "
+                f"that reveal the next step."
+            )
+
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": (
+                    f"Start exploiting {self.target}. "
+                    f"Output your first HTTP request as JSON. "
+                    f"Remember: focus on {direction_hint.split('.')[0].lower()}."
+                )},
+            ]
+
+            for turn in range(max_iters_per_worker):
+                if cancel_event.is_set():
+                    return None
+
+                try:
+                    response = llm.chat(messages, temperature=0.7, max_tokens=600)
+                    content = response.get("content", "")
+
+                    # Try to parse HTTP request from LLM output
+                    req_data = self._parse_llm_http_request(content)
+                    if not req_data:
+                        messages.append({"role": "assistant", "content": content})
+                        messages.append({"role": "user", "content": (
+                            "Invalid format. Output a valid JSON HTTP request with "
+                            "at minimum 'method' and 'url' fields."
+                        )})
+                        continue
+
+                    # Execute the request using the shared session
+                    try:
+                        method = req_data.get("method", "GET").upper()
+                        url = req_data.get("url", self.target)
+                        headers = req_data.get("headers") or {}
+                        data = req_data.get("data")
+                        params = req_data.get("params")
+
+                        if method == "POST":
+                            resp = worker_session.post(
+                                url, data=data, params=params,
+                                headers=headers, timeout=8,
+                            )
+                        else:
+                            resp = worker_session.get(
+                                url, params=params,
+                                headers=headers, timeout=8,
+                            )
+
+                        resp_text = resp.text[:3000]
+
+                        # Check for flag in response
+                        match = flag_pattern.search(resp_text)
+                        if match:
+                            cancel_event.set()
+                            log.info(
+                                "Phase 2 worker #%d found flag on turn %d",
+                                worker_id + 1, turn + 1,
+                            )
+                            return match.group(0)
+
+                        # Record to shared blackboard so other workers see it
+                        try:
+                            self._blackboard.record_attempt(
+                                route=f"llm_worker_{worker_id}",
+                                tool="http_request",
+                                args={"url": url, "method": method},
+                                success=False,
+                                result_summary=f"HTTP {resp.status_code}, {len(resp.text)} bytes",
+                                failure_reason="no_flag",
+                            )
+                        except Exception:
+                            pass
+
+                        # Feed response back to LLM for next iteration
+                        messages.append({"role": "assistant", "content": content})
+                        messages.append({
+                            "role": "user",
+                            "content": (
+                                f"Response (HTTP {resp.status_code}, {len(resp.text)} bytes):\n"
+                                f"{resp_text[:800]}\n\n"
+                                f"Analyze this response. Look for flags, hints, error messages, "
+                                f"or clues. Then try your next payload."
+                            ),
+                        })
+
+                    except requests.RequestException as e:
+                        messages.append({"role": "assistant", "content": content})
+                        messages.append({"role": "user", "content": (
+                            f"Request failed: {e}. Try a different URL or approach."
+                        )})
+
+                except Exception as exc:
+                    log.debug("Phase 2 worker #%d error: %s", worker_id + 1, exc)
+                    break
+
+            return None
+
+        # Launch workers in parallel (one per direction hint)
+        num_workers = min(3, len(direction_hints))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=num_workers) as executor:
+            futures = {
+                executor.submit(worker, hint, idx): idx
+                for idx, hint in enumerate(direction_hints[:num_workers])
+            }
+            try:
+                for future in concurrent.futures.as_completed(futures, timeout=time_cap):
+                    try:
+                        result = future.result(timeout=5)
+                        if result:
+                            cancel_event.set()
+                            self._emit(
+                                "ctf_parallel_phase2_done",
+                                worker=futures[future],
+                                flag=result,
+                            )
+                            return result
+                    except Exception:
+                        continue
+            except concurrent.futures.TimeoutError:
+                cancel_event.set()
+                log.warning("Phase 2 parallel workers timed out after %.0fs", time_cap)
+
+        return None
+
+    def _parse_llm_http_request(self, content: str) -> Optional[Dict[str, Any]]:
+        """Parse an HTTP request JSON from LLM output."""
+        # Try to find JSON in the content
+        try:
+            # Direct JSON parse
+            data = json.loads(content)
+            if isinstance(data, dict) and ("url" in data or "method" in data):
+                return data
+        except json.JSONDecodeError:
+            pass
+
+        # Try to extract JSON from markdown code block
+        json_match = re.search(r'```(?:json)?\s*(\{[^`]+\})\s*```', content, re.DOTALL)
+        if json_match:
+            try:
+                data = json.loads(json_match.group(1))
+                if isinstance(data, dict):
+                    return data
+            except json.JSONDecodeError:
+                pass
+
+        # Try to find any JSON object in the text
+        brace_match = re.search(r'\{[^{}]*"(?:url|method)"[^{}]*\}', content)
+        if brace_match:
+            try:
+                data = json.loads(brace_match.group(0))
+                if isinstance(data, dict):
+                    return data
+            except json.JSONDecodeError:
+                pass
+
+        return None
 
     def _result(
         self,

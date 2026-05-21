@@ -660,15 +660,34 @@ class ReconAgent(BaseAgent):
             except Exception:
                 pass
 
-        # Extract params from form inputs
+        # Extract params from form inputs — detect form method to set correct location
+        # First, build a map of form regions to their method
+        form_pattern = re.compile(
+            r'<form[^>]*>', re.IGNORECASE
+        )
+        form_method_pattern = re.compile(r'method=["\'](\w+)["\']', re.IGNORECASE)
+        # Find all forms and their methods
+        form_regions: list = []  # (start_pos, method)
+        for fm in form_pattern.finditer(html):
+            method_match = form_method_pattern.search(fm.group(0))
+            method = method_match.group(1).upper() if method_match else "GET"
+            form_regions.append((fm.start(), method))
+
         input_pattern = re.compile(
             r'<input[^>]*name=["\']([^"\']+)["\'][^>]*>', re.IGNORECASE
         )
         for match in input_pattern.finditer(html):
             param_name = match.group(1)
+            # Determine location based on enclosing form's method
+            location = "body"  # default for POST forms
+            input_pos = match.start()
+            for form_start, form_method in reversed(form_regions):
+                if form_start < input_pos:
+                    location = "query" if form_method == "GET" else "body"
+                    break
             self.blackboard.record_param(
                 name=param_name,
-                location="body",
+                location=location,
                 suspected_route="",
             )
 
@@ -752,6 +771,16 @@ class ReconAgent(BaseAgent):
             self.blackboard.add_evidence(
                 route="cmdi", score=0.85, source="recon_fingerprint",
                 observation="Network/ping tool detected (command injection likely)",
+            )
+
+        # CMDi: input field named "ip" or page text containing "/?ip=" or "ping" in title
+        has_ip_input = bool(re.search(r'<input[^>]*name=["\']ip["\']', text, re.IGNORECASE))
+        has_ip_param_hint = "/?ip=" in text or "?ip=" in text_lower
+        has_ping_title = bool(re.search(r'<title>[^<]*ping[^<]*</title>', text, re.IGNORECASE))
+        if has_ip_input or has_ip_param_hint or has_ping_title:
+            self.blackboard.add_evidence(
+                route="cmdi", score=0.90, source="recon_fingerprint",
+                observation="Ping/IP input detected (command injection likely)",
             )
 
     def _follow_interesting_links(self) -> Dict[str, Any]:
