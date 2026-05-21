@@ -86,7 +86,7 @@ class CTFReActAgent:
         self,
         target: str,
         challenge_type: Optional[str] = None,
-        flag_format: str = r"[A-Za-z0-9_]+\{[^}]+\}",
+        flag_format: str = r"flag\{[^}]+\}",
         max_iterations: int = 15,
         timeout: int = 300,
         thinking: bool = True,

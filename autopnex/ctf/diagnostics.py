@@ -10,14 +10,14 @@ from .flag_engine import FlagEngine
 def normalise_flag_format(flag_format: str) -> str:
     raw = (flag_format or "").strip()
     if not raw or raw in {"flag{...}", r"flag\{...\}"}:
-        return r"[A-Za-z0-9_]+\{[^}]+\}"
+        return r"flag\{[^}]+\}"
     if raw == "flag":
-        return r"[A-Za-z0-9_]+\{[^}]+\}"
+        return r"flag\{[^}]+\}"
     try:
         re.compile(raw)
         return raw
     except re.error:
-        return r"[A-Za-z0-9_]+\{[^}]+\}"
+        return r"flag\{[^}]+\}"
 
 
 def compact_for_llm(text: str, limit: int = 8000) -> str:
@@ -57,8 +57,70 @@ def check_flag_in_text(text: str, *, flag_engine: FlagEngine, flag_format: str) 
     candidates.sort(key=lambda item: item.confidence, reverse=True)
     best = candidates[0]
     if best.confidence >= 0.8:
+        # AI validation: reject false positives (CSS, JS, HTML)
+        if not _ai_validate_flag_candidate(best.value, text):
+            return None
         return best.value
     return None
+
+
+def _ai_validate_flag_candidate(candidate: str, context: str) -> bool:
+    """Use AI to confirm a flag candidate is real, not CSS/JS/HTML noise.
+
+    Returns True if AI confirms or is unavailable (fail-open).
+    """
+    # Fast-path: known CTF prefixes are always valid
+    _KNOWN = ("flag{", "ctf{", "hctf{", "sctf{", "hitcon{", "bctf{",
+              "dasctf{", "nctf{", "actf{", "rctf{", "gwctf{", "buuctf{")
+    if candidate.lower().startswith(_KNOWN):
+        return True
+
+    # Fast-path rejection: obvious non-flag patterns
+    prefix = candidate.split("{")[0].lower() if "{" in candidate else ""
+    _NON_FLAGS = {
+        "input", "body", "div", "span", "html", "form", "table", "button",
+        "select", "textarea", "label", "section", "header", "footer", "nav",
+        "main", "aside", "article", "style", "script", "function", "class",
+        "const", "let", "var", "return", "export", "import", "if", "else",
+        "for", "while", "switch", "case", "p", "a", "h1", "h2", "h3",
+        "ul", "ol", "li", "tr", "td", "th", "img", "svg", "pre", "code",
+    }
+    if prefix in _NON_FLAGS:
+        return False
+
+    # Content heuristic: CSS-like content
+    inner = candidate.split("{", 1)[1].rstrip("}") if "{" in candidate else ""
+    if inner.count(":") >= 2 and inner.count(";") >= 1:
+        return False
+    if len(inner) > 80:
+        return False
+    if "\n" in inner or "\r" in inner or "\\r" in inner or "\\n" in inner:
+        return False
+
+    # AI validation for truly ambiguous cases
+    try:
+        from autopnex.orchestrator.llm_client import LLMClient
+        llm = LLMClient()
+        if not llm.enabled:
+            return True
+
+        idx = context.find(candidate)
+        start = max(0, idx - 40) if idx >= 0 else 0
+        end = min(len(context), (idx if idx >= 0 else 0) + len(candidate) + 40)
+        snippet = context[start:end] if idx >= 0 else context[:150]
+
+        messages = [
+            {"role": "system", "content": (
+                "You validate CTF flags. Reply ONLY 'YES' or 'NO'.\n"
+                "Real flags: short prefix + {leet_speak_or_hex_5_to_60_chars}.\n"
+                "NOT flags: CSS rules, JS code, HTML tags, config blocks."
+            )},
+            {"role": "user", "content": f"Is this a CTF flag?\nCandidate: {candidate}\nContext: {snippet}"},
+        ]
+        result = llm.chat(messages, temperature=0.0, max_tokens=5)
+        return not result.get("content", "").strip().upper().startswith("NO")
+    except Exception:
+        return True  # Fail-open
 
 
 def diagnose_tool_result(tool_name: str, tool_args: Dict[str, Any], tool_result: Dict[str, Any]) -> str:
