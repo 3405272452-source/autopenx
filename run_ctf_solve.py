@@ -17,7 +17,7 @@ settings.reload()
 from autopnex.ctf.react_agent import CTFReActAgent
 from pathlib import Path
 
-TARGET = "http://60e6b32d-53cd-4b47-a8e6-059edf8da462.node5.buuoj.cn:81"
+TARGET = "http://2835d91d-1e60-4662-8dd7-b82bd1db9e04.node5.buuoj.cn:81"
 
 
 def progress_callback(event):

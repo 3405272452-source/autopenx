@@ -165,13 +165,13 @@ class RouteStateMachine(ABC):
 
     def _get(self, path: str, params: Optional[Dict[str, str]] = None, **kwargs) -> requests.Response:
         url = urljoin(self.target_url + "/", path.lstrip("/"))
-        resp = self.session.get(url, params=params, timeout=15, allow_redirects=False, **kwargs)
+        resp = self.session.get(url, params=params, timeout=8, allow_redirects=False, **kwargs)
         self._http_history.append({"method": "GET", "url": url, "params": params, "status": resp.status_code})
         return resp
 
     def _post(self, path: str, data: Any = None, **kwargs) -> requests.Response:
         url = urljoin(self.target_url + "/", path.lstrip("/"))
-        resp = self.session.post(url, data=data, timeout=15, allow_redirects=False, **kwargs)
+        resp = self.session.post(url, data=data, timeout=8, allow_redirects=False, **kwargs)
         self._http_history.append({"method": "POST", "url": url, "status": resp.status_code})
         return resp
 
@@ -427,17 +427,37 @@ class RouteStateMachine(ABC):
         return self._get(parsed.path or "/", params=params)
 
     def run_exploit(self) -> Tuple[bool, Optional[str]]:
-        """Run exploit steps. Returns (found_flag, flag_value)."""
+        """Run exploit steps. Returns (found_flag, flag_value).
+
+        Safety limits:
+          - Max 20 steps per route (prevents 100+ step routes from blocking)
+          - Max 30 seconds total per route (prevents slow targets from hanging)
+          - Individual HTTP timeout is 8 seconds (not 15)
+        """
+        MAX_STEPS_PER_ROUTE = 20
+        MAX_TIME_PER_ROUTE = 30.0
+        route_start = time.time()
+
+        all_steps = self.get_exploit_steps()
+        # Cap the number of steps to prevent excessive HTTP requests
+        capped_steps = all_steps[:MAX_STEPS_PER_ROUTE]
+
         if not self.state.steps:
             self.state.steps = [
                 StepRecord(
                     step_index=i,
                     description=step.get("description", step.get("name", f"step_{i}")),
                 )
-                for i, step in enumerate(self.get_exploit_steps())
+                for i, step in enumerate(capped_steps)
             ]
 
-        for i, step_def in enumerate(self.get_exploit_steps()):
+        for i, step_def in enumerate(capped_steps):
+            # Time limit check
+            if time.time() - route_start > MAX_TIME_PER_ROUTE:
+                self.state.progress = "done"
+                self.state.stop_reason = "time_limit_per_route"
+                break
+
             step = self.state.steps[i]
             step.status = StepStatus.IN_PROGRESS
             step.timestamp = time.time()
@@ -475,7 +495,8 @@ class RouteStateMachine(ABC):
                 step.result_summary = f"Error: {e}"
 
         self.state.progress = "done"
-        self.state.stop_reason = "exploit_chain_complete"
+        if not self.state.stop_reason:
+            self.state.stop_reason = "exploit_chain_complete"
         return False, None
 
     def _execute_step(self, step_def: Dict[str, Any]) -> requests.Response:
@@ -492,7 +513,7 @@ class RouteStateMachine(ABC):
                 params=step_def.get("params"),
                 headers=step_def.get("headers", {}),
                 files=step_def.get("files"),
-                timeout=15,
+                timeout=8,
                 allow_redirects=False,
             )
         else:
@@ -500,7 +521,7 @@ class RouteStateMachine(ABC):
                 url,
                 params=step_def.get("params"),
                 headers=step_def.get("headers", {}),
-                timeout=15,
+                timeout=8,
                 allow_redirects=False,
             )
 
@@ -2126,7 +2147,7 @@ class UploadMachine(RouteStateMachine):
 
         url = urljoin(self.target_url + "/", self._upload_path.lstrip("/"))
         files = {"file": (payload_template, content, content_type)}
-        resp = self.session.post(url, files=files, timeout=15, allow_redirects=False)
+        resp = self.session.post(url, files=files, timeout=8, allow_redirects=False)
         return resp
 
     def score_evidence(self, probe_name: str, response: requests.Response) -> EvidenceScore:
