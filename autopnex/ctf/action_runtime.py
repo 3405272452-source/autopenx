@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 log = logging.getLogger("autopnex.ctf.action_runtime")
 
@@ -75,7 +75,6 @@ class ActionRuntime:
         last_error = ""
         raw_output: Dict[str, Any] = {}
 
-        effective_timeout = timeout or self.base_timeout
         is_retryable = retryable if retryable is not None else self._is_retryable_by_default(tool_name)
 
         for attempt in range(1, self.max_retries + 1):

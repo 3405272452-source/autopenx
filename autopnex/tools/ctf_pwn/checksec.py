@@ -123,7 +123,7 @@ def _parse_elf_headers(binary_path: str) -> Dict[str, Any]:
         sh_off = struct.unpack_from(f"{endian}Q", data, 40)[0]
         sh_ent_size = struct.unpack_from(f"{endian}H", data, 58)[0]
         sh_num = struct.unpack_from(f"{endian}H", data, 60)[0]
-        sh_strndx = struct.unpack_from(f"{endian}H", data, 62)[0]
+        struct.unpack_from(f"{endian}H", data, 62)[0]
     else:
         # 32-bit ELF header
         ph_off = struct.unpack_from(f"{endian}I", data, 28)[0]
@@ -132,7 +132,7 @@ def _parse_elf_headers(binary_path: str) -> Dict[str, Any]:
         sh_off = struct.unpack_from(f"{endian}I", data, 32)[0]
         sh_ent_size = struct.unpack_from(f"{endian}H", data, 46)[0]
         sh_num = struct.unpack_from(f"{endian}H", data, 48)[0]
-        sh_strndx = struct.unpack_from(f"{endian}H", data, 50)[0]
+        struct.unpack_from(f"{endian}H", data, 50)[0]
 
     # Parse program headers for PT_GNU_STACK (NX) and PT_GNU_RELRO
     PT_GNU_STACK = 0x6474E551
@@ -159,9 +159,7 @@ def _parse_elf_headers(binary_path: str) -> Dict[str, Any]:
 
     # Parse section headers to detect canary (__stack_chk_fail) and full RELRO
     # Get section name string table
-    dynamic_entries: Dict[int, int] = {}
     SHT_DYNAMIC = 6
-    SHT_DYNSYM = 11
 
     canary_found = False
     full_relro = False

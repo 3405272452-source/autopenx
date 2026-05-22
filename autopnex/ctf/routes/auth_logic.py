@@ -8,7 +8,6 @@ import requests
 from autopnex.ctf.route_state_machine import (
     RouteStateMachine,
     EvidenceScore,
-    ProbeResult,
     MACHINE_REGISTRY,
 )
 

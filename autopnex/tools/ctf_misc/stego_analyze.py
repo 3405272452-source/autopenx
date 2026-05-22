@@ -5,7 +5,6 @@ Provides both a standalone function ``stego_analyze(image_path, method)`` and a 
 """
 from __future__ import annotations
 
-import os
 import shutil
 import subprocess
 import re

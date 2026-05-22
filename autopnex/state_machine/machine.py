@@ -6,10 +6,10 @@ import logging
 from typing import Any, Callable, Dict, List, Optional
 
 from config.settings import RuntimeConfig, settings
-from ..knowledge_base.vuln_patterns import SEVERITY_REMEDIATION, VULN_PATTERNS
+from ..knowledge_base.vuln_patterns import SEVERITY_REMEDIATION
 from ..orchestrator import LLMOrchestrator, ReActStep
 from ..tools.base import ToolResult
-from .findings import Finding, StateFindings, TaskItem
+from .findings import StateFindings, TaskItem
 from .ingester import ingest_tool_result
 
 

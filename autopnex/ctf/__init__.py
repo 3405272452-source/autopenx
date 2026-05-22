@@ -44,7 +44,7 @@ from .attack_chain_orchestrator import (
 from .workspace_cleaner import WorkspaceCleaner, one_click_cleanup
 
 # M1: PromptCompiler + WebStateBlackboard + RouteCards + RouteStateMachines
-from .web_state_blackboard import (
+from .web_state_blackboard import (  # noqa: F401
     WebStateBlackboard,
     EndpointRecord,
     FormRecord,
@@ -56,7 +56,7 @@ from .web_state_blackboard import (
     EvidenceStrength,
 )
 from .knowledge_learner import KnowledgeLearner
-from .prompt_compiler import PromptCompiler, TokenBudget, build_task_context, compress_history, summarize_html
+from .prompt_compiler import PromptCompiler, TokenBudget, build_task_context, compress_history, summarize_html  # noqa: F401
 from .route_cards import RouteCard, ROUTE_CARDS, get_route_card, get_routes_for_evidence
 from .source_audit_agent import SourceAuditAgent, AuditResult, SinkInfo, SourceInfo, DataFlow
 from .route_state_machine import (

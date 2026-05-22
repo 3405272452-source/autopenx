@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import hashlib
 import struct
-from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from dataclasses import dataclass
+from typing import List
 
 
 # ---------------------------------------------------------------------------
@@ -149,12 +149,12 @@ def build_phar(serialized: bytes, alias: str = "test.txt") -> bytes:
     return stub + manifest_blob + signature
 
 
-from .thinkphp import THINKPHP_CHAINS
-from .laravel import LARAVEL_CHAINS
-from .yii import YII_CHAINS
-from .laminas import LAMINAS_CHAINS
-from .symfony import SYMFONY_CHAINS
-from .generic import GENERIC_CHAINS
+from .thinkphp import THINKPHP_CHAINS  # noqa: E402
+from .laravel import LARAVEL_CHAINS  # noqa: E402
+from .yii import YII_CHAINS  # noqa: E402
+from .laminas import LAMINAS_CHAINS  # noqa: E402
+from .symfony import SYMFONY_CHAINS  # noqa: E402
+from .generic import GENERIC_CHAINS  # noqa: E402
 
 ALL_CHAINS = THINKPHP_CHAINS + LARAVEL_CHAINS + YII_CHAINS + LAMINAS_CHAINS + SYMFONY_CHAINS + GENERIC_CHAINS
 

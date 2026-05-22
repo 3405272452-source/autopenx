@@ -7,7 +7,7 @@ ReconAgent to discover hidden attack surface in modern web applications.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Dict, List, Optional
 
 

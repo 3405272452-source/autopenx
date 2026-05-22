@@ -5,7 +5,6 @@ Runs locally if hydra binary is found; otherwise falls back to Docker.
 from __future__ import annotations
 
 import re
-import shutil
 from typing import Any, Dict, List
 
 from ..base import BaseTool, ToolResult, register

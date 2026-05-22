@@ -25,7 +25,7 @@ import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Any, Callable, Dict, List, Literal, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Literal, Optional, Tuple
 from urllib.parse import urljoin, urlparse
 
 import requests
@@ -317,7 +317,7 @@ class RouteStateMachine(ABC):
         Returns False if AI says it's not a flag.
         """
         try:
-            from autopnex.orchestrator.llm_client import LLMClient, LLMError
+            from autopnex.orchestrator.llm_client import LLMClient
             llm = LLMClient()
             if not llm.enabled:
                 return True  # No API key → trust regex
@@ -491,7 +491,7 @@ class RouteStateMachine(ABC):
                 # Check for flag
                 flag = self._check_flag(resp.text)
                 if flag:
-                    step.result_summary += f" — FLAG FOUND"
+                    step.result_summary += " — FLAG FOUND"
                     self.state.progress = "done"
                     self.state.stop_reason = "flag_found"
                     return True, flag
@@ -665,7 +665,7 @@ class SourceLeakMachine(RouteStateMachine):
             # If content looks like HTML, it's probably a catch-all response
             if "<html" in text.lower() or "<body" in text.lower():
                 return EvidenceScore("source_leak", 0.0, probe_name,
-                                     f"返回 HTML 而非配置文件内容")
+                                     "返回 HTML 而非配置文件内容")
 
         # Backup files (.bak, ~, .swp)
         if any(f in probe_name for f in [".bak", "~", ".swp"]) and status == 200 and length > 10:
@@ -1308,7 +1308,7 @@ class SSTIMachine(RouteStateMachine):
         # keyword inside a template-delimited expression.
         steps.extend([
             {
-                "name": f"twig_dollar_flag",
+                "name": "twig_dollar_flag",
                 "description": "Twig/Mako ${flag} 模板",
                 "method": "GET",
                 "path": base_path,
@@ -1316,7 +1316,7 @@ class SSTIMachine(RouteStateMachine):
                 "extract_flag": True,
             },
             {
-                "name": f"smarty_brace_flag",
+                "name": "smarty_brace_flag",
                 "description": "Smarty {flag} 模板",
                 "method": "GET",
                 "path": base_path,
@@ -1324,7 +1324,7 @@ class SSTIMachine(RouteStateMachine):
                 "extract_flag": True,
             },
             {
-                "name": f"smarty_system",
+                "name": "smarty_system",
                 "description": "Smarty {system('cat /flag')} 模板",
                 "method": "GET",
                 "path": base_path,
@@ -2233,7 +2233,7 @@ class JWTMachine(RouteStateMachine):
 
         if response.status_code == 200:
             return EvidenceScore("jwt", 0.5, probe_name,
-                                 f"JWT 修改后仍返回 200 — 可能签名验证不严格")
+                                 "JWT 修改后仍返回 200 — 可能签名验证不严格")
         if response.status_code in (401, 403):
             return EvidenceScore("jwt", 0.2, probe_name,
                                  "JWT 被拒绝 — 签名验证有效")
@@ -2348,7 +2348,7 @@ class UploadMachine(RouteStateMachine):
                 return True, f"发现文件上传表单: {form.get('action', '?')}"
             fields = form.get("fields", [])
             if any(f.get("type", "") == "file" for f in fields):
-                return True, f"发现文件上传字段"
+                return True, "发现文件上传字段"
 
         endpoints = blackboard_state.get("key_endpoints", [])
         upload_endpoints = [e for e in endpoints if any(
@@ -2413,13 +2413,13 @@ class UploadMachine(RouteStateMachine):
             # Check if response reveals upload path
             if any(p in text for p in path_indicators):
                 return EvidenceScore("upload", 0.7, probe_name,
-                                     f"上传成功，响应包含路径信息")
+                                     "上传成功，响应包含路径信息")
             if any(s in text for s in upload_indicators):
                 return EvidenceScore("upload", 0.5, probe_name,
                                      f"上传可能成功: {response.status_code}")
 
         if status == 200:
-            return EvidenceScore("upload", 0.4, probe_name, f"上传返回 200")
+            return EvidenceScore("upload", 0.4, probe_name, "上传返回 200")
 
         return EvidenceScore("upload", 0.0, probe_name, f"状态码 {status}")
 
@@ -2604,7 +2604,7 @@ class PHPPopMachine(RouteStateMachine):
             detail = str(e.get("detail", "")).lower()
             if "unserialize" in detail or "phar" in detail:
                 self._found_unserialize = True
-                return True, f"源码中发现 unserialize/phar 触发点"
+                return True, "源码中发现 unserialize/phar 触发点"
 
         if any("php" in str(t).lower() for t in tech_stack):
             return True, "PHP 应用 — 探测反序列化入口"
@@ -3379,9 +3379,7 @@ class GraphQLMachine(RouteStateMachine):
             return self._get(self._endpoint, params={"query": payload_template})
 
         # POST-based query (default)
-        headers = {"Content-Type": "application/json"}
         if name == "urlencoded":
-            headers = {"Content-Type": "application/x-www-form-urlencoded"}
             return self._post(self._endpoint, data=f"query={payload_template}")
 
         return self._post(
@@ -3731,7 +3729,7 @@ class WebSocketMachine(RouteStateMachine):
                     return EvidenceScore("websocket", 0.9, probe_name,
                                          f"Token '{probe_name.split('_',1)[-1]}' 获得敏感响应")
                 return EvidenceScore("websocket", 0.5, probe_name,
-                                     f"Token 鉴权成功但非 admin 权限")
+                                     "Token 鉴权成功但非 admin 权限")
 
             # Message injection response
             if probe_name.startswith("message_injection"):

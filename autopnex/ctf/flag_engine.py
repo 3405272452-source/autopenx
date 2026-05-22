@@ -10,7 +10,7 @@ import base64
 import codecs
 import re
 import urllib.parse
-from typing import Dict, List, Optional, Set, Tuple
+from typing import List, Optional, Set, Tuple
 
 from .models import FlagCandidate
 

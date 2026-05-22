@@ -5,7 +5,7 @@ misconfigured security response headers and identifies potential vulnerabilities
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from ..base import BaseTool, ToolResult, register
 from .._http import normalise_target, request
@@ -164,7 +164,6 @@ class HeadersAuditTool(BaseTool):
             else:
                 present_headers.append(header_name)
                 # Check for weak values
-                weak_found = False
                 for indicator in config.get("weak_indicators", []):
                     if indicator in value:
                         issues.append({
@@ -175,7 +174,6 @@ class HeadersAuditTool(BaseTool):
                             "description": f"{config['description']} — weak value detected: {indicator}",
                             "recommendation": config["recommendation"],
                         })
-                        weak_found = True
                         break
 
                 # Check expected values

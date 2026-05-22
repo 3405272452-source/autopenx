@@ -6,7 +6,6 @@ Auto-detection mode identifies the encoding from the data pattern.
 from __future__ import annotations
 
 import base64
-import binascii
 import re
 import urllib.parse
 from typing import Any, Dict, List, Optional, Tuple

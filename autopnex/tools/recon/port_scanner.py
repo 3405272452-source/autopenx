@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-import socket
 from typing import Any, Dict, List
 
 from ..base import BaseTool, ToolResult, register

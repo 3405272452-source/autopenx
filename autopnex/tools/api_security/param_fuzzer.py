@@ -5,14 +5,11 @@ knowledge_base/vuln_patterns.py for comprehensive injection testing.
 """
 from __future__ import annotations
 
-import html
-import re
 from typing import Any, Dict, List
 from urllib.parse import urlencode, urlparse, parse_qsl, urlunparse
 
 from ..base import BaseTool, ToolResult, register
 from .._http import normalise_target, request
-from ...knowledge_base.vuln_patterns import VULN_PATTERNS
 
 
 # Fuzz categories and their payloads

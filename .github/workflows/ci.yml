@@ -31,10 +31,6 @@ jobs:
         python -m pytest tests/ -x --tb=short -q \
           --ignore=tests/benchmark/ \
           --ignore=tests/performance/ \
-          --ignore=tests/domain/ \
-          --ignore=tests/application/ \
-          --ignore=tests/infrastructure/ \
-          --ignore=tests/ui/ \
           -m "not benchmark and not slow"
 
     - name: Run regression tests
@@ -87,48 +83,3 @@ jobs:
     - name: Run E2E baseline tests
       run: |
         python -m pytest tests/benchmark/test_web_e2e_baseline.py -v
-
-  # ---------------------------------------------------------------------------
-  # cet4-app job — runs the CET-4 Study App (src/cet4_app) quality gates.
-  #
-  # Scope: lint, format-check, architectural import contracts, property-based
-  # + unit tests (hypothesis `ci` profile), and a coverage floor of 80% for the
-  # cet4_app package. Tests are scoped to the tests/{domain,infrastructure,
-  # application,ui} subtrees so this job does not overlap with the AutoPenX
-  # `test` job above.
-  # ---------------------------------------------------------------------------
-  cet4-app:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.11", "3.12"]
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: ${{ matrix.python-version }}
-
-    - name: Install cet4-app with dev extras
-      run: |
-        python -m pip install --upgrade pip
-        pip install -e ".[dev]"
-
-    - name: Ruff lint
-      run: ruff check src/cet4_app tests/domain tests/application tests/infrastructure tests/ui
-
-    - name: Ruff format check
-      run: ruff format --check src/cet4_app tests/domain tests/application tests/infrastructure tests/ui
-
-    - name: Import-Linter (layer contracts)
-      run: lint-imports --config importlinter.ini
-
-    - name: Pytest (hypothesis ci profile) with coverage
-      run: |
-        coverage run -m pytest -q \
-          --hypothesis-profile=ci \
-          tests/domain tests/application tests/infrastructure tests/ui
-
-    - name: Coverage report (fail under 80%)
-      run: coverage report --fail-under=80

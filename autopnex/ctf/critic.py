@@ -13,7 +13,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 from .fuse_controller import FuseController
-from .shared_journal import EvidenceCard, HypothesisRecord, SharedJournal
+from .shared_journal import HypothesisRecord, SharedJournal
 from .strategy import StrategyEngine
 
 log = logging.getLogger("autopnex.ctf.critic")

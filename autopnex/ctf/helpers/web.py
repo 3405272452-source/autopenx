@@ -711,7 +711,7 @@ def try_xss_flag_from_tool_result(
     if tool_name != "http_request" or not agent.runtime_config.exploit_enabled:
         return None
     url = str(tool_result.get("url") or tool_args.get("url") or agent.target)
-    body = str(tool_result.get("body", ""))
+    str(tool_result.get("body", ""))
     split = urlsplit(url)
     params = dict(parse_qsl(split.query, keep_blank_values=True))
     candidate_names = [name for name in params if name.lower() in XSS_PARAM_NAMES]
@@ -864,7 +864,7 @@ def try_source_leak_chain_from_tool_result(
 
     url = str(tool_result.get("url") or tool_args.get("url") or agent.target)
     status_code = tool_result.get("status_code", 0)
-    body = str(tool_result.get("body", ""))
+    str(tool_result.get("body", ""))
 
     # Detect source leak indicators in the URL or response
     url_lower = url.lower()

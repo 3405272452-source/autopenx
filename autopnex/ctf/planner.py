@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import re
 from collections import deque
-from typing import Any, Dict, List, Optional, Set, Tuple, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 from .models import AttackPlan, AttackStep, ChallengeProfile, ChallengeType, StepResult
 

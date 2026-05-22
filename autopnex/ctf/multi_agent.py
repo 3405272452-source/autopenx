@@ -16,17 +16,16 @@ from __future__ import annotations
 
 import json
 import logging
-import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
-from .web_state_blackboard import WebStateBlackboard, EvidenceCard, AttemptRecord
-from .route_cards import RouteCard, ROUTE_CARDS, get_route_card
+from .web_state_blackboard import WebStateBlackboard
+from .route_cards import get_route_card
 from .route_state_machine import (
-    RouteStateMachine, MACHINE_REGISTRY, create_machine, run_route, RouteResult,
+    create_machine, run_route, RouteResult,
 )
 from .js_analyzer import JSAnalyzer
 
@@ -216,7 +215,7 @@ class CoordinatorAgent(BaseAgent):
                 supporting_evidence=[e.observation for e in evidence_for_route[:3]],
                 next_action={"action": "delegate", "to": "exploit", "route": best_route},
                 stop_if=["flag_found", "max_attempts_reached"],
-                reasoning=f"Source leak is always worth trying — delegating to ExploitAgent",
+                reasoning="Source leak is always worth trying — delegating to ExploitAgent",
             )
 
         if evidence_for_route:
@@ -871,7 +870,7 @@ class ReconAgent(BaseAgent):
         /?page=/tmp/flag or /?file=/flag that would directly reveal the flag.
         """
         import re
-        from urllib.parse import urlparse as _urlparse, parse_qs as _parse_qs, urljoin
+        from urllib.parse import urljoin
 
         findings = []
 

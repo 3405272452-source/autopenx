@@ -8,10 +8,8 @@ from __future__ import annotations
 import base64
 import io
 import logging
-import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
-from urllib.parse import urljoin
 
 import requests
 

@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 import string
 from collections import Counter
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List
 
 from ..base import BaseTool, ToolResult, register
 

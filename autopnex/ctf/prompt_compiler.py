@@ -330,7 +330,7 @@ def compress_history(
     non_system = [m for m in messages if m.get("role") != "system"]
 
     result.extend(system_msgs)
-    used = sum(_count(m) for m in result)
+    sum(_count(m) for m in result)
 
     if not non_system:
         return result

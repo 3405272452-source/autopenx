@@ -5,7 +5,6 @@ and future MCP/CLI bridges.
 """
 from __future__ import annotations
 
-import json
 import logging
 import re
 import traceback
@@ -458,7 +457,7 @@ def _exec_scan_flag(args: Dict[str, Any], flag_engine: FlagEngine) -> Dict[str, 
 
 def _exec_file_analyze(args: Dict[str, Any]) -> Dict[str, Any]:
     """Analyze a file - type detection, string extraction."""
-    from .source_analyzer import SourceAnalysis, analyze_attachment
+    from .source_analyzer import analyze_attachment
 
     file_path = args.get("file_path", "")
     if not file_path:

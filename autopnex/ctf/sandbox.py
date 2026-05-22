@@ -13,7 +13,6 @@ import subprocess
 import sys
 import tempfile
 import uuid
-from pathlib import Path
 from typing import Dict, Optional
 
 
@@ -105,7 +104,7 @@ class CTFSandbox:
                 }
                 return session_id
             # Docker 创建失败，降级到子进程模式
-        
+
         # 子进程隔离模式：创建临时目录
         workspace = tempfile.mkdtemp(prefix=f"ctf_sandbox_{session_id[:8]}_")
         self._sessions[session_id] = {

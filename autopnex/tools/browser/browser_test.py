@@ -6,7 +6,6 @@ applications (React, Angular, Vue) that cannot be tested with simple HTTP reques
 from __future__ import annotations
 
 import asyncio
-import textwrap
 from typing import Any, Dict
 
 from ..base import BaseTool, ToolResult, register
@@ -108,7 +107,7 @@ class BrowserTestTool(BaseTool):
                 wrapped_script = self._build_script(target, script)
 
                 # Execute with timeout
-                exec_result = await asyncio.wait_for(
+                await asyncio.wait_for(
                     self._run_script(page, context, browser, wrapped_script, output_lines, error_lines),
                     timeout=timeout / 1000,
                 )
@@ -157,15 +156,7 @@ class BrowserTestTool(BaseTool):
         old_stdout = sys.stdout
         sys.stdout = captured = io.StringIO()
         try:
-            exec_globals = {
-                "page": page,
-                "context": context,
-                "browser": browser,
-                "target": None,  # Set by script preamble
-                "asyncio": asyncio,
-            }
-            exec_locals = {}
-            compiled = compile(script, "<browser_test>", "exec")
+            compile(script, "<browser_test>", "exec")
 
             # The script uses top-level await which won't work in exec.
             # Instead, wrap in an async function and run it.
@@ -198,12 +189,12 @@ class BrowserTestTool(BaseTool):
     def _indent_script(self, script: str, spaces: int) -> str:
         """Indent user script while preserving relative indentation."""
         lines = script.split("\n")
-        non_empty = [l for l in lines if l.strip()]
+        non_empty = [line for line in lines if line.strip()]
         if not non_empty:
             return ""
-        min_indent = min(len(l) - len(l.lstrip()) for l in non_empty)
+        min_indent = min(len(line) - len(line.lstrip()) for line in non_empty)
         indent = " " * spaces
         return "\n".join(
-            indent + l[min_indent:] if l.strip() else ""
-            for l in lines
+            indent + line[min_indent:] if line.strip() else ""
+            for line in lines
         )

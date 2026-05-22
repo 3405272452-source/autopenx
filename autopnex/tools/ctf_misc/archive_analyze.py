@@ -197,7 +197,7 @@ def _attempt_extraction(path: Path, is_pseudo_encrypted: bool) -> List[str]:
         # Normal extraction
         try:
             with zipfile.ZipFile(str(path), "r") as zf:
-                with tempfile.TemporaryDirectory() as tmpdir:
+                with tempfile.TemporaryDirectory():
                     for info in zf.infolist():
                         if info.is_dir():
                             continue

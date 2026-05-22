@@ -66,12 +66,12 @@ ltm/reports/
 ltm/bin/
 
 # ---------------------------------------------------------------------------
-# CET4 desktop sub-project (not part of Web CTF Agent)
+# Legacy desktop build outputs (kept ignored in case prior PyInstaller runs
+# still drop artifacts in this repo). The cet4-study-app source itself was
+# extracted to F:\work-kiro\cet4-project on 2026-05-22.
 # ---------------------------------------------------------------------------
-src/cet4_app/
-CET4StudyApp.exe
-CET4StudyApp.spec
 *.exe
+*.spec.bak
 
 # ---------------------------------------------------------------------------
 # External binary tools (vendored binaries)
@@ -107,3 +107,6 @@ _write_init.py
 *.bak
 .mypy_cache/
 .ruff_cache/
+
+pytest-of-*/
+

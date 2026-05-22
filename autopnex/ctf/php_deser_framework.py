@@ -8,7 +8,7 @@ from __future__ import annotations
 import base64
 import io
 import gzip
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional
 
 from .pop_chains import ALL_CHAINS, POPChain, build_phar  # noqa: F401 — re-exported
 

@@ -1,7 +1,6 @@
 """Generic Docker command executor — run any command in the Shannon container."""
 from __future__ import annotations
 
-import shutil
 from typing import Any, Dict
 
 from ..base import BaseTool, ToolResult, register

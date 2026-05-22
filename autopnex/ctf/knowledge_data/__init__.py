@@ -11,7 +11,7 @@ CTF 经验知识库数据包。
 
 使用方式：
     from autopnex.ctf.knowledge_data import load_patterns, load_tool_reference
-    
+
     web_patterns = load_patterns("web")
     tools = load_tool_reference()
 """
@@ -25,10 +25,10 @@ _DATA_DIR = Path(__file__).parent
 
 def load_patterns(category: str) -> Dict:
     """加载指定题型的解题模式数据。
-    
+
     Args:
         category: 题型类别 (web/crypto/pwn/misc/reverse)
-    
+
     Returns:
         包含该题型所有解题模式的字典
     """
@@ -59,20 +59,20 @@ def get_patterns_for_challenge(
     indicators: Optional[List[str]] = None,
 ) -> List[Dict]:
     """根据题目特征匹配最相关的解题模式。
-    
+
     Args:
         category: 题型类别
         indicators: 题目中发现的特征/指标列表
-    
+
     Returns:
         匹配的解题模式列表，按相关度排序
     """
     data = load_patterns(category)
     patterns = data.get("patterns", [])
-    
+
     if not indicators:
         return patterns
-    
+
     # 按指标匹配度排序
     scored_patterns = []
     for pattern in patterns:
@@ -83,17 +83,17 @@ def get_patterns_for_challenge(
         overlap = len(pattern_indicators & input_indicators)
         if overlap > 0:
             scored_patterns.append((overlap, pattern))
-    
+
     scored_patterns.sort(key=lambda x: x[0], reverse=True)
     return [p for _, p in scored_patterns] if scored_patterns else patterns
 
 
 def get_payloads_for_vuln(vuln_type: str) -> List[str]:
     """获取指定漏洞类型的Payload列表。
-    
+
     Args:
         vuln_type: 漏洞类型 (sqli, ssti, lfi, cmdi, ssrf, xxe等)
-    
+
     Returns:
         Payload字符串列表
     """
@@ -107,10 +107,10 @@ def get_payloads_for_vuln(vuln_type: str) -> List[str]:
         "deserialization": "web",
         "rsa": "crypto", "aes": "crypto", "xor": "crypto",
     }
-    
+
     category = vuln_to_category.get(vuln_type.lower(), "web")
     data = load_patterns(category)
-    
+
     for pattern in data.get("patterns", []):
         pattern_id = pattern.get("id", "")
         if vuln_type.lower() in pattern_id.lower():
@@ -126,7 +126,7 @@ def get_payloads_for_vuln(vuln_type: str) -> List[str]:
                     else:
                         all_payloads.append(str(val))
                 return all_payloads
-    
+
     return []
 
 

@@ -1,15 +1,14 @@
 """Sequential executor for attack chains with checkpointing and approval gates."""
 from __future__ import annotations
 
-import copy
 import logging
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 
-from ..tools.base import ToolRegistry, ToolResult
-from .attack_graph import AttackChain, AttackEdge, AttackGraph, EdgeStatus
+from ..tools.base import ToolRegistry
+from .attack_graph import AttackEdge, AttackGraph, EdgeStatus
 from .findings import StateFindings
 
 logger = logging.getLogger(__name__)

@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import logging
 import shutil
-import struct
 import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Optional

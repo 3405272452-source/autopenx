@@ -8,7 +8,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-import subprocess
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -20,14 +19,10 @@ from .models import (
     ChallengeProfile,
     ChallengeType,
     CTFResult,
-    StepResult,
 )
 from .knowledge_data import (
     load_patterns,
-    load_tool_reference,
     get_patterns_for_challenge,
-    get_payloads_for_vuln,
-    get_first_steps,
 )
 
 log = logging.getLogger("autopnex.ctf.offline_solver")

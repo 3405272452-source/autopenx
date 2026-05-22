@@ -5,9 +5,8 @@ Runs locally if gowitness binary is found; otherwise falls back to Docker.
 from __future__ import annotations
 
 import os
-import shutil
 import tempfile
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 from ..base import BaseTool, ToolResult, register
 from .docker_manager import DockerManager

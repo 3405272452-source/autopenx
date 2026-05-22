@@ -17,8 +17,7 @@ import time
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
-from urllib.parse import urljoin
+from typing import Any, Dict, List, Optional
 
 import requests
 
@@ -30,12 +29,10 @@ from .php_audit_engine import (
     VulnType,
     Severity,
 )
-from .source_analyzer import SourceAnalysis, analyze_attachment
+from .source_analyzer import analyze_attachment
 from .php_deser_framework import (
     POPChainSelector,
     PayloadGenerator,
-    POPChain,
-    quick_pop_payload,
 )
 from .upload_exploit import UploadExploit
 from .webshell_manager import WebshellManager
@@ -270,7 +267,7 @@ class AttackChainOrchestrator:
             r = self._session.get(self._target, timeout=self._timeout)
             if r.status_code < 500:
                 return True, {"status_code": r.status_code, "length": len(r.content)}
-        except requests.RequestException as e:
+        except requests.RequestException:
             pass  # Continue anyway
         return True, {"note": "Starting attack chain"}
 
@@ -352,7 +349,7 @@ class AttackChainOrchestrator:
                     try:
                         analysis = analyze_attachment(str(local))
                         for file_entry in analysis.files:
-                            path = file_entry.get("path", "")
+                            file_entry.get("path", "")
                     except Exception:
                         pass
 
@@ -546,7 +543,6 @@ class AttackChainOrchestrator:
         if not self._exploit_enabled:
             return False, {"reason": "Exploit disabled"}
 
-        results: List[Dict[str, Any]] = []
 
         # Strategy 1: Try command injection on common parameters
         base = self._target.rstrip("/")

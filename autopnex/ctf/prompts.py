@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import Dict, List, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .models import ChallengeInput, ChallengeProfile, StepResult
+    from .models import ChallengeProfile
 
 
 # ---------------------------------------------------------------------------

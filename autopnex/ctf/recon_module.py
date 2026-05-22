@@ -13,7 +13,7 @@ import logging
 import re
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin
 
 import requests
 
@@ -69,7 +69,7 @@ class AttackSurface:
                 lines.append(f"  - {js}")
 
         if self.technologies:
-            lines.append(f"\n### Technologies Detected")
+            lines.append("\n### Technologies Detected")
             lines.append(f"  {', '.join(self.technologies)}")
 
         if self.forms:

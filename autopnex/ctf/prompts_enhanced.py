@@ -178,17 +178,17 @@ WEB_CHALLENGE_PROMPT = """\
 - Flag扫描：每个响应都经过flag_engine.scan()
 
 【Web题解题决策树】：
-目标URL → 
+目标URL →
   ├─ 查看源码/注释 → 发现线索？
   ├─ robots.txt/.git → 信息泄露？
   ├─ 目录扫描 → 隐藏页面？
-  ├─ 参数测试 → 
+  ├─ 参数测试 →
   │   ├─ 单引号报错 → SQL注入 → sqlmap
   │   ├─ {{7*7}}=49 → SSTI → tplmap/手动
   │   ├─ ../etc/passwd → LFI → 读flag
   │   ├─ ;id有输出 → 命令注入 → cat /flag
   │   └─ XML输入 → XXE → file:///flag
-  ├─ 登录页面 → 
+  ├─ 登录页面 →
   │   ├─ 弱密码 → admin/admin
   │   ├─ SQL注入绕过 → ' OR '1'='1
   │   └─ JWT → 算法混淆/弱密钥
@@ -420,18 +420,18 @@ def build_ctf_system_prompt(
 ) -> str:
     """
     构建完整的CTF解题系统提示词。
-    
+
     Args:
         challenge_type: 题型 (web/pwn/crypto/misc/reverse)
         knowledge_context: 从知识库查询到的相关知识
         similar_solutions: 相似题目的历史解法
-    
+
     Returns:
         完整的系统提示词字符串
     """
     # 基础系统提示词
     prompt = CTF_SYSTEM_PROMPT
-    
+
     # 添加题型专用提示词
     type_prompts = {
         "web": WEB_CHALLENGE_PROMPT,
@@ -442,28 +442,28 @@ def build_ctf_system_prompt(
     }
     if challenge_type in type_prompts:
         prompt += "\n\n" + type_prompts[challenge_type]
-    
+
     # 注入知识库上下文
     if knowledge_context:
         prompt += "\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         prompt += "📚 经验库查询结果（你必须参考这些信息）\n"
         prompt += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        
+
         if "patterns" in knowledge_context:
             prompt += "\n【匹配的解题模式】:\n"
             for pattern in knowledge_context["patterns"][:3]:
                 prompt += f"- {pattern['name']}: {' → '.join(pattern.get('methodology', [])[:3])}\n"
-        
+
         if "payloads" in knowledge_context:
             prompt += "\n【推荐Payload】:\n"
             for payload in knowledge_context["payloads"][:10]:
                 prompt += f"- {payload}\n"
-        
+
         if "tools" in knowledge_context:
             prompt += "\n【推荐工具】:\n"
             for tool in knowledge_context["tools"]:
                 prompt += f"- {tool}\n"
-    
+
     # 注入相似题目解法
     if similar_solutions:
         prompt += "\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -474,10 +474,10 @@ def build_ctf_system_prompt(
             prompt += f"  策略: {solution.get('strategy', '')}\n"
             prompt += f"  工具: {', '.join(solution.get('tools_used', []))}\n"
             prompt += f"  关键步骤: {solution.get('key_steps', '')}\n"
-    
+
     # 添加知识库查询指令
     prompt += "\n\n" + KNOWLEDGE_QUERY_INSTRUCTION
-    
+
     return prompt
 
 
@@ -488,17 +488,17 @@ def build_replan_prompt(
 ) -> str:
     """
     构建重规划提示词 - 当当前策略失败时使用。
-    
+
     明确指示AI参考经验库中的备选策略。
     """
-    prompt = f"""\
+    prompt = """\
 当前策略已失败，你需要重新规划。
 
 【已失败的步骤】:
 """
     for step in failed_steps:
         prompt += f"- {step.get('tool', 'unknown')}: {step.get('error', '失败')}\n"
-    
+
     prompt += """
 【必须执行】重新查询经验库：
 1. knowledge_base.query_alternatives(failed_patterns) → 获取备选方案
@@ -511,10 +511,10 @@ def build_replan_prompt(
 - 考虑是否遗漏了某些信息收集步骤
 - 尝试完全不同的攻击角度
 """
-    
+
     if knowledge_context and "alternatives" in knowledge_context:
         prompt += "\n【经验库推荐的备选策略】:\n"
         for alt in knowledge_context["alternatives"]:
             prompt += f"- {alt}\n"
-    
+
     return prompt

@@ -8,7 +8,6 @@ from __future__ import annotations
 import json
 import re
 from typing import Any, Dict, List
-from urllib.parse import urlparse
 
 from ..base import BaseTool, ToolResult, register
 from .._http import normalise_target, request

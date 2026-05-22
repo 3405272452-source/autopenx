@@ -1,7 +1,7 @@
 """Vulnerability fingerprints, payload library and remediation hints."""
 from __future__ import annotations
 
-from typing import Dict, List
+from typing import Dict
 
 
 VULN_PATTERNS: Dict[str, Dict] = {

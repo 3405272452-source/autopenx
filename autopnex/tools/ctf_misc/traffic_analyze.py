@@ -33,12 +33,6 @@ def traffic_analyze(pcap_path: str, filter_expr: str = "") -> dict:
     if not path.exists():
         return {"error": f"File not found: {pcap_path}", "protocols": [], "conversations": 0, "extracted_data": [], "suspicious": []}
 
-    result: Dict[str, Any] = {
-        "protocols": [],
-        "conversations": 0,
-        "extracted_data": [],
-        "suspicious": [],
-    }
 
     # Try tshark first
     tshark_bin = shutil.which("tshark")

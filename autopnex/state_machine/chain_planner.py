@@ -5,10 +5,10 @@ and builds concrete :class:`AttackChain` instances inside the attack graph.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List
 
-from .attack_graph import AttackGraph, AttackChain, AttackEdge, NodeType, EdgeStatus
-from .findings import Finding, StateFindings
+from .attack_graph import AttackGraph, AttackChain, NodeType
+from .findings import StateFindings
 
 IMPACT_ORDER = {"LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4}
 

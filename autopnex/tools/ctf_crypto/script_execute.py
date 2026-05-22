@@ -15,7 +15,7 @@ import os
 import subprocess
 import sys
 import tempfile
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from ..base import BaseTool, ToolResult, register
 
@@ -183,7 +183,7 @@ class ScriptExecuteTool(BaseTool):
         exit_code = exec_result["exit_code"]
 
         if success:
-            summary = f"Script executed successfully (exit code 0)"
+            summary = "Script executed successfully (exit code 0)"
             if stdout:
                 summary += f", output: {stdout[:200]!r}"
         else:

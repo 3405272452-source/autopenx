@@ -8,7 +8,6 @@ from __future__ import annotations
 import io
 import logging
 import re
-import gzip
 import zlib
 import struct
 from dataclasses import dataclass, field
@@ -17,7 +16,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple
 
 if TYPE_CHECKING:
     from .workspace_cleaner import WorkspaceCleaner
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import urlsplit
 
 import requests
 
@@ -458,18 +457,18 @@ def _parse_git_index(data: bytes) -> List[Tuple[str, str]]:
         for _ in range(min(entry_count, 200)):
             if offset + 62 > len(data):
                 break
-            ctime_s = struct.unpack(">I", data[offset:offset + 4])[0]
-            ctime_ns = struct.unpack(">I", data[offset + 4:offset + 8])[0]
-            mtime_s = struct.unpack(">I", data[offset + 8:offset + 12])[0]
-            mtime_ns = struct.unpack(">I", data[offset + 12:offset + 16])[0]
-            dev = struct.unpack(">I", data[offset + 16:offset + 20])[0]
-            ino = struct.unpack(">I", data[offset + 20:offset + 24])[0]
-            mode = struct.unpack(">I", data[offset + 24:offset + 28])[0]
-            uid = struct.unpack(">I", data[offset + 28:offset + 32])[0]
-            gid = struct.unpack(">I", data[offset + 32:offset + 36])[0]
-            size = struct.unpack(">I", data[offset + 36:offset + 40])[0]
+            struct.unpack(">I", data[offset:offset + 4])[0]
+            struct.unpack(">I", data[offset + 4:offset + 8])[0]
+            struct.unpack(">I", data[offset + 8:offset + 12])[0]
+            struct.unpack(">I", data[offset + 12:offset + 16])[0]
+            struct.unpack(">I", data[offset + 16:offset + 20])[0]
+            struct.unpack(">I", data[offset + 20:offset + 24])[0]
+            struct.unpack(">I", data[offset + 24:offset + 28])[0]
+            struct.unpack(">I", data[offset + 28:offset + 32])[0]
+            struct.unpack(">I", data[offset + 32:offset + 36])[0]
+            struct.unpack(">I", data[offset + 36:offset + 40])[0]
             sha1_hex = data[offset + 40:offset + 60].hex()
-            flags = struct.unpack(">H", data[offset + 60:offset + 62])[0]
+            struct.unpack(">H", data[offset + 60:offset + 62])[0]
             offset += 62
             if version >= 3:
                 offset += 2

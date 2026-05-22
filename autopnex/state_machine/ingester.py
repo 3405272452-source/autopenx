@@ -556,7 +556,7 @@ def ingest_tool_result(
                     cwe = auto_correlate("js_secret")
                     findings.add_finding(
                         Finding(
-                            title=f"Hardcoded API Key in JS",
+                            title="Hardcoded API Key in JS",
                             severity="HIGH",
                             status="confirmed",
                             category="js_secret",

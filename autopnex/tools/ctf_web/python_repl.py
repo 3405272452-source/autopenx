@@ -3,8 +3,7 @@ from __future__ import annotations
 
 import contextlib
 import io
-import sys
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 
 class PersistentREPL:

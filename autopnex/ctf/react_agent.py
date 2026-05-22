@@ -11,7 +11,6 @@ import json
 import logging
 import re
 import time
-import traceback
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set
 
@@ -21,7 +20,6 @@ from config.settings import RuntimeConfig, settings
 from .capability_registry import CTFCapabilityRegistry
 from .tool_router import (
     CORE_TOOL_NAMES,
-    DEFAULT_CTF_TOOL_NAMES,
     ToolRouter,
 )
 from .diagnostics import (
@@ -44,16 +42,14 @@ from .fuse_controller import FuseController
 from .helpers.dispatcher import DeterministicHelperDispatcher
 from .shared_journal import AttemptRecord, EvidenceCard, SharedJournal
 from .task_queue import TaskQueue
-from .web_session import FormExtractor, SessionFlowManager
+from .web_session import SessionFlowManager
 from .models import ChallengeProfile, ChallengeType
-from .prompts import CTF_REACT_PLAN_PROMPT, CTF_TYPE_PROMPTS
-from .prompt_compiler import PromptCompiler, TokenBudget
-from .route_cards import get_route_card, get_routes_for_evidence
+from .prompt_compiler import PromptCompiler
+from .route_cards import get_route_card
 from .web_state_blackboard import WebStateBlackboard
 from .session import CTFSessionState
 from .workers import (
     BaseCTFWorker,
-    CriticWorker,
     ReconWorker,
     ReverseCryptoWorker,
     WebExploitWorker,
@@ -1190,7 +1186,7 @@ class CTFReActAgent:
             duration_ms = int(elapsed * 1000)
             return self._result(
                 success=False,
-                reasoning=f"Multi-Agent + parallel LLM exhausted, no time for sequential fallback",
+                reasoning="Multi-Agent + parallel LLM exhausted, no time for sequential fallback",
                 duration_ms=duration_ms,
                 error="flag_not_found",
             )
@@ -1215,7 +1211,7 @@ class CTFReActAgent:
         self._messages.append({"role": "user", "content": context_msg})
 
         # Run the standard ReAct loop (this calls _call_llm iteratively)
-        from ..orchestrator.llm_client import LLMClient, LLMError
+        from ..orchestrator.llm_client import LLMClient
         try:
             self._llm = LLMClient()
             if not self._llm.enabled:
@@ -1700,7 +1696,7 @@ class CTFReActAgent:
             elif tool == "run_python":
                 code = args.get("code", "")
                 # Extract first meaningful line
-                lines = [l.strip() for l in code.split("\n") if l.strip() and not l.strip().startswith("#")]
+                lines = [ln.strip() for ln in code.split("\n") if ln.strip() and not ln.strip().startswith("#")]
                 if lines:
                     parts.append(f"python: {lines[0][:60]}")
             elif tool == "decode_data":

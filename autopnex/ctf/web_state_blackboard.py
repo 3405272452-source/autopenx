@@ -17,8 +17,8 @@ import time
 from dataclasses import dataclass, field, asdict
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
-from urllib.parse import urljoin, urlparse, urlsplit
+from typing import Any, Dict, List, Optional
+from urllib.parse import urlsplit
 
 log = logging.getLogger("autopnex.ctf.web_state_blackboard")
 
@@ -607,7 +607,7 @@ class WebStateBlackboard:
 
         # AI validation — only for ambiguous cases
         try:
-            from autopnex.orchestrator.llm_client import LLMClient, LLMError
+            from autopnex.orchestrator.llm_client import LLMClient
             llm = LLMClient()
             if not llm.enabled:
                 return True  # Fail-open: no API key → trust regex

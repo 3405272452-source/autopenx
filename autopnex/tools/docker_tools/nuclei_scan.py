@@ -5,7 +5,6 @@ Runs locally if nuclei binary is found; otherwise falls back to Docker.
 from __future__ import annotations
 
 import json
-import shutil
 from typing import Any, Dict
 
 from ..base import BaseTool, ToolResult, register

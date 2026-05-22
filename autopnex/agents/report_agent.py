@@ -21,7 +21,7 @@ class ReportAgent(BaseAgent):
         self._emit("phase_start", phase="REPORT", task_count=len(tasks))
         start = time.perf_counter_ns()
 
-        snapshot = self.blackboard.snapshot()
+        self.blackboard.snapshot()
         findings_obj = self.blackboard.full_findings()
 
         report_data = {

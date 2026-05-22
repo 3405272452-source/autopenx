@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import time
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
 from ..base import BaseTool, ToolResult, register
 from .._http import normalise_target, request

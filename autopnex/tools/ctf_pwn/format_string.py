@@ -74,7 +74,6 @@ def format_string_exploit(
     # Strategy: write value byte-by-byte using %hhn (write single byte)
     # This is the most reliable approach for format string exploits
     writes: List[Dict[str, Any]] = []
-    payload_parts: List[bytes] = []
     explanation_lines: List[str] = []
 
     explanation_lines.append(
