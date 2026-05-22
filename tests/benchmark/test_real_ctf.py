@@ -59,6 +59,56 @@ _TARGET_SCENARIO_MAP: Dict[str, str] = {
 }
 
 
+def _extract_winning_route(action_log: List[Dict[str, Any]], found: bool) -> str:
+    """Extract the winning route from an action log.
+
+    Strategy (in priority order):
+    1. Find a process_result entry with stop=True and flag set → look for the
+       preceding exploit_decide in the same round for the route.
+    2. Find the last exploit_decide entry with a non-empty, non-"unknown" route.
+    3. Fall back to the coordinate phase's decision.route field (handles the case
+       where flag is found via candidate_flags early return in round 1, before any
+       exploit_decide phase exists).
+    4. Return "unknown" as final fallback — never return empty string.
+    """
+    if not action_log or not found:
+        return "unknown"
+
+    # Strategy 1: process_result with stop=True and flag → find exploit_decide in same round
+    for entry in reversed(action_log):
+        if entry.get("phase") == "process_result":
+            outcome = entry.get("outcome", {})
+            if outcome.get("stop") and outcome.get("flag"):
+                winning_round = entry.get("round")
+                # Find the exploit_decide in the same round
+                for e2 in reversed(action_log):
+                    if (
+                        e2.get("phase") == "exploit_decide"
+                        and e2.get("round") == winning_round
+                    ):
+                        route = e2.get("decision", {}).get("route", "")
+                        if route and route != "unknown":
+                            return route
+                break  # Only check the last process_result with stop+flag
+
+    # Strategy 2: last exploit_decide with a valid route
+    for entry in reversed(action_log):
+        if entry.get("phase") == "exploit_decide":
+            route = entry.get("decision", {}).get("route", "")
+            if route and route != "unknown":
+                return route
+
+    # Strategy 3: coordinate phase decision.route (key fix for candidate_flags early return)
+    for entry in reversed(action_log):
+        if entry.get("phase") == "coordinate":
+            route = entry.get("decision", {}).get("route", "")
+            if route and route != "unknown" and route != "recon":
+                return route
+
+    # Final fallback
+    return "unknown"
+
+
 def _run_agent(target, target_id: str, max_rounds: int = 15) -> Dict[str, Any]:
     from autopnex.ctf.multi_agent import MultiAgentOrchestrator
 
@@ -106,39 +156,9 @@ def _run_agent(target, target_id: str, max_rounds: int = 15) -> Dict[str, Any]:
         except Exception:
             pass
 
-        # Extract winning route from action log if not found from state
+        # Fall back to action_log extraction if not found from orchestrator state
         if not result["winning_route"] and found and action_log:
-            # Look for the last exploit decision that led to success
-            for entry in reversed(action_log):
-                phase = entry.get("phase", "")
-                if phase == "exploit_decide":
-                    decision = entry.get("decision", {})
-                    route_val = decision.get("route", "")
-                    if route_val and route_val != "unknown":
-                        result["winning_route"] = route_val
-                        break
-                elif phase == "execute" and entry.get("agent") == "exploit":
-                    result_summary = str(entry.get("result_summary", ""))
-                    if "found_flag" in result_summary or "flag" in result_summary.lower():
-                        # Get route from the corresponding coordinate phase
-                        pass
-                elif phase == "process_result":
-                    outcome = entry.get("outcome", {})
-                    if outcome.get("stop") and outcome.get("flag"):
-                        # The winning route is in the preceding exploit_decide
-                        continue
-
-            # Second pass: look for route in exec_result
-            if not result["winning_route"]:
-                for entry in reversed(action_log):
-                    result_summary = str(entry.get("result_summary", ""))
-                    if "'found_flag': True" in result_summary or "'status': 'success'" in result_summary:
-                        # Extract route from result_summary
-                        import re as _re
-                        route_match = _re.search(r"'route':\s*'([^']+)'", result_summary)
-                        if route_match:
-                            result["winning_route"] = route_match.group(1)
-                            break
+            result["winning_route"] = _extract_winning_route(action_log, found)
 
         # Determine attribution: deterministic (state machine) vs llm_fallback
         attribution = "deterministic"
@@ -221,7 +241,14 @@ def test_real_ctf(real_target):
 
 
 def _write_coverage_report(results: Dict[str, Dict[str, Any]], report_dir: Path) -> None:
-    """Write scenario coverage report mapping each target to pass/fail with attribution."""
+    """Write scenario coverage report mapping each target to pass/fail with attribution.
+
+    Produces three sections:
+    - scenario_coverage: backward-compatible pass/fail per scenario
+    - detailed_coverage: per-target entries with actual vs expected scenario comparison
+    - summary: aggregate counts and match rate
+    """
+    # --- Backward-compatible scenario_coverage section ---
     scenario_coverage: Dict[str, Dict[str, Any]] = {}
     for target_id, result in results.items():
         scenario = _TARGET_SCENARIO_MAP.get(target_id, f"unknown.{target_id}")
@@ -233,7 +260,65 @@ def _write_coverage_report(results: Dict[str, Dict[str, Any]], report_dir: Path)
             "attribution": attribution,
         }
 
-    coverage = {"scenario_coverage": scenario_coverage}
+    # --- New detailed_coverage section ---
+    detailed_coverage: List[Dict[str, Any]] = []
+    for target_id, result in results.items():
+        expected_scenario = _TARGET_SCENARIO_MAP.get(target_id, f"unknown.{target_id}")
+        actual_route = result.get("winning_route", "") or "unknown"
+        attribution = result.get("attribution", "deterministic")
+
+        # Derive actual_scenario from actual_route and expected_scenario
+        if "." in expected_scenario:
+            expected_prefix = expected_scenario.split(".")[0]
+            expected_subtype = expected_scenario.split(".")[1]
+            if actual_route == expected_prefix:
+                actual_scenario = actual_route + "." + expected_subtype
+            else:
+                actual_scenario = actual_route + ".unknown"
+        else:
+            actual_scenario = actual_route + ".unknown"
+
+        match = expected_scenario == actual_scenario
+
+        detailed_coverage.append({
+            "target_id": target_id,
+            "expected_scenario": expected_scenario,
+            "actual_route": actual_route,
+            "actual_scenario": actual_scenario,
+            "attribution": attribution,
+            "match": match,
+        })
+
+    # --- Summary section ---
+    total = len(detailed_coverage)
+    solved_by_expected_route = 0
+    solved_by_different_route = 0
+    solved_by_llm_fallback = 0
+
+    for entry in detailed_coverage:
+        if entry["attribution"] == "llm_fallback":
+            solved_by_llm_fallback += 1
+        elif entry["match"]:
+            solved_by_expected_route += 1
+        else:
+            solved_by_different_route += 1
+
+    match_rate = round(solved_by_expected_route / total, 2) if total else 0.0
+
+    summary = {
+        "total": total,
+        "solved_by_expected_route": solved_by_expected_route,
+        "solved_by_different_route": solved_by_different_route,
+        "solved_by_llm_fallback": solved_by_llm_fallback,
+        "match_rate": match_rate,
+    }
+
+    # --- Assemble and write report ---
+    coverage = {
+        "scenario_coverage": scenario_coverage,
+        "detailed_coverage": detailed_coverage,
+        "summary": summary,
+    }
     coverage_path = report_dir / "coverage_report.json"
     coverage_path.write_text(
         json.dumps(coverage, indent=2, ensure_ascii=False),
