@@ -11,6 +11,7 @@ import json
 import logging
 import re
 import time
+import warnings
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set
 
@@ -1024,7 +1025,25 @@ class CTFReActAgent:
     async def _solve_multi_agent(self, start_time: float) -> Dict[str, Any]:
         """Hybrid solve: MultiAgentOrchestrator first, then ReAct LLM fallback.
 
-        Strategy:
+        .. deprecated::
+            This method is a **legacy** parallel execution path retained only
+            for backward compatibility and as a fallback when CTFSolvePipeline
+            is not used.
+
+            The **canonical** parallel AI execution path is now:
+                CTFSolvePipeline.run() → Phase2Runner
+            which provides:
+              - Evidence-driven dynamic worker assignment (via ParallelScanOutput)
+              - Structured phase transitions with StallDetector
+              - DiscoveryBroadcast for inter-worker communication
+              - ExperienceWriter integration for knowledge accumulation
+              - Unified SolveResult with full attribution
+
+            New features and enhancements should be implemented in
+            ``CTFSolvePipeline`` + ``Phase2Runner`` only. Do NOT add new
+            logic here to avoid dual-maintenance divergence.
+
+        Legacy Strategy (kept for reference):
           1. Run deterministic state machine routes (fast, zero API cost)
           2. If flag found → return immediately
           3. Phase 1.5: Parallel LLM race (3 workers × 5 turns each)
@@ -1032,6 +1051,20 @@ class CTFReActAgent:
              The LLM gets the blackboard state as context so it doesn't repeat
              what the state machine already tried.
         """
+        # --- DEPRECATION WARNING ---
+        # This method is a legacy parallel execution path. The canonical path
+        # is CTFSolvePipeline + Phase2Runner. See solve_pipeline.py.
+        warnings.warn(
+            "CTFReActAgent._solve_multi_agent() is deprecated. "
+            "Use CTFSolvePipeline + Phase2Runner for parallel AI execution.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        log.warning(
+            "Using legacy _solve_multi_agent() path. Prefer CTFSolvePipeline "
+            "+ Phase2Runner for parallel AI execution with full feature support."
+        )
+
         from .multi_agent import MultiAgentOrchestrator
 
         # Emit progress so Web UI knows Phase 1 is starting

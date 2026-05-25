@@ -8,8 +8,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
+import html as _html_mod
 import markdown as md
-from jinja2 import Environment, FileSystemLoader, select_autoescape
+from jinja2 import Environment, FileSystemLoader
 
 from ..orchestrator.llm_client import LLMClient, LLMError
 from ..state_machine.findings import StateFindings
@@ -26,7 +27,7 @@ class ReportGenerator:
         self.llm = llm_client
         self.env = Environment(
             loader=FileSystemLoader(str(TEMPLATES_DIR)),
-            autoescape=select_autoescape(disabled_extensions=("md", "j2")),
+            autoescape=True,
             trim_blocks=True,
             lstrip_blocks=True,
         )
@@ -73,7 +74,7 @@ class ReportGenerator:
             extensions=["tables", "fenced_code", "toc", "sane_lists"],
         )
         html = _HTML_SHELL.replace("{{body}}", html_body).replace(
-            "{{title}}", f"AutoPenX Report — {findings.target}"
+            "{{title}}", f"AutoPenX Report — {_html_mod.escape(findings.target)}"
         )
         return markdown_text, html
 

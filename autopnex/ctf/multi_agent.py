@@ -28,6 +28,7 @@ from .route_state_machine import (
     create_machine, run_route, RouteResult,
 )
 from .js_analyzer import JSAnalyzer
+from .hint_injector import HintInjector
 
 log = logging.getLogger("autopnex.ctf.multi_agent")
 
@@ -104,28 +105,36 @@ class CoordinatorAgent(BaseAgent):
 
     agent_name = "coordinator"
 
-    # Route priority: higher = try first
-    ROUTE_PRIORITY = {
+    # Task 10.1: Static base route priority (higher = try first)
+    BASE_ROUTE_PRIORITY = {
         "source_leak": 10,  # Always first — highest ROI
         "ssti": 9,          # Strong signal, short chain
         "cmdi": 8,          # Direct flag read
         "lfi": 8,           # Direct flag read
-        "sqli": 7,          # Common, scriptable
+        "sqli": 8,          # Common, scriptable — WAF bypass payloads
+        "websocket": 8,     # Deterministic param-based bypass (direct flag)
+        "xss": 8,           # Admin bot chain, deterministic direct flag
+        "deserialization": 8,  # Pickle/serialization RCE — cheap probes
+        "race": 8,          # Concurrent request race condition — cheap probes
         "graphql": 7,       # Deterministic POST JSON
         "jwt": 7,           # Deterministic alg=none + weak-key brute force
         "upload": 7,        # Deterministic 2-step + multi-variant payloads
-        "websocket": 8,     # Deterministic param-based bypass (direct flag)
-        "xss": 8,           # Admin bot chain, deterministic direct flag
         "ssrf": 7,          # Deterministic file:// + metadata probes
         "php_pop": 7,       # Cookie/phar probes are cheap
         "idor": 7,          # Path-based id enumeration is cheap
         "xxe": 6,           # XML entity injection
         "auth_logic": 6,    # Cookie/header manipulation bypass
+        "nosql": 6,         # JSON operator injection (cheap probes)
         "recon": 5,
     }
 
+    # Task 10.4: Dynamic priority bounds to prevent monopoly
+    _DYNAMIC_PRIORITY_MIN = 1
+    _DYNAMIC_PRIORITY_MAX = 12
+
     def __init__(self, blackboard: WebStateBlackboard, session=None,
-                 max_rounds: int = 15, max_repeats_per_route: int = 3):
+                 max_rounds: int = 15, max_repeats_per_route: int = 3,
+                 knowledge_path=None):
         super().__init__(blackboard, session)
         self.max_rounds = max_rounds
         self.max_repeats_per_route = max_repeats_per_route
@@ -133,6 +142,81 @@ class CoordinatorAgent(BaseAgent):
         self.route_failures: Dict[str, int] = {}    # route -> consecutive failures
         self.current_round: int = 0
         self.budget_remaining: int = max_rounds
+        # Task 10.2: Load dynamic weights from unified schema
+        self._dynamic_weights = self._load_dynamic_weights(knowledge_path)
+
+    @property
+    def ROUTE_PRIORITY(self) -> Dict[str, int]:
+        """Merged static priority + dynamic weights.
+
+        Task 10.1: Split into BASE_ROUTE_PRIORITY + dynamic merge.
+        Task 10.3: Maps weight [0, 1] to priority adjustment [-3, +3].
+        Task 10.4: Clamps result to [_DYNAMIC_PRIORITY_MIN, _DYNAMIC_PRIORITY_MAX].
+        Task 10.5: This serves the legacy/hybrid path; ParallelRouteScan is
+                   the primary Phase 1 sorter.
+        """
+        merged = dict(self.BASE_ROUTE_PRIORITY)
+        for route, weight in self._dynamic_weights.items():
+            if route in merged:
+                # Task 10.3: weight [0, 1] → adjustment [-3, +3]
+                adjustment = int((weight - 0.5) * 6)
+                new_priority = merged[route] + adjustment
+                # Task 10.4: Clamp to bounds
+                merged[route] = max(
+                    self._DYNAMIC_PRIORITY_MIN,
+                    min(self._DYNAMIC_PRIORITY_MAX, new_priority),
+                )
+            else:
+                # New route from experience — assign a base priority from weight
+                # weight 0.5 → priority 6, weight 1.0 → priority 9
+                new_priority = int(3 + weight * 6)
+                merged[route] = max(
+                    self._DYNAMIC_PRIORITY_MIN,
+                    min(self._DYNAMIC_PRIORITY_MAX, new_priority),
+                )
+        return merged
+
+    def _load_dynamic_weights(self, knowledge_path=None) -> Dict[str, float]:
+        """Load route weights from the unified ctf_knowledge.json schema.
+
+        Task 10.2: Uses knowledge_schema.load_knowledge() for robust loading
+        with migration support and graceful degradation.
+
+        Args:
+            knowledge_path: Optional path to ctf_knowledge.json. If None,
+                uses the default project-root location.
+
+        Returns:
+            Dict mapping route names to float weights in [0.0, 1.0].
+            Returns empty dict on any error (graceful degradation).
+        """
+        try:
+            from pathlib import Path
+            from autopnex.ctf.knowledge_schema import load_knowledge
+
+            path = Path(knowledge_path) if knowledge_path else None
+            knowledge = load_knowledge(path)
+            weights = knowledge.get("route_weights", {})
+
+            # Validate: ensure all values are floats in [0, 1]
+            validated: Dict[str, float] = {}
+            for route, weight in weights.items():
+                if isinstance(weight, (int, float)):
+                    validated[route] = max(0.0, min(1.0, float(weight)))
+
+            if validated:
+                log.info(
+                    "CoordinatorAgent loaded %d dynamic route weights: %s",
+                    len(validated),
+                    {k: f"{v:.2f}" for k, v in list(validated.items())[:5]},
+                )
+            return validated
+        except Exception as exc:
+            log.debug(
+                "CoordinatorAgent: failed to load dynamic weights: %s — using static only",
+                exc,
+            )
+            return {}
 
     def decide(self) -> AgentDecision:
         self.current_round += 1
@@ -258,7 +342,8 @@ class CoordinatorAgent(BaseAgent):
                 "lfi", "ssti", "sqli", "cmdi", "jwt", "graphql",
                 "websocket", "xss", "upload",
                 "ssrf", "idor", "php_pop",
-                "xxe", "auth_logic",
+                "xxe", "auth_logic", "nosql",
+                "race", "deserialization",
             }
             if best_route in ALWAYS_EXPLOIT_ROUTES:
                 return AgentDecision(
@@ -337,7 +422,7 @@ class CoordinatorAgent(BaseAgent):
             # Tech stack fingerprint boosts (Requirement 4.2)
             php_routes = ["php_pop", "source_leak", "lfi", "ssti"]
             python_routes = ["ssti", "cmdi"]
-            node_routes = ["ssrf", "ssti"]
+            node_routes = ["ssrf", "ssti", "nosql"]
 
             if any("php" in str(t).lower() for t in tech_stack):
                 if route_name in php_routes:
@@ -347,7 +432,7 @@ class CoordinatorAgent(BaseAgent):
                     score += 0.12  # Python framework → boost ssti/cmdi
             if any(t.lower() in ("express", "node") for t in tech_stack if isinstance(t, str)):
                 if route_name in node_routes:
-                    score += 0.1  # Node.js → boost ssrf/ssti
+                    score += 0.1  # Node.js → boost ssrf/ssti/nosql
 
             # Penalty for repeated failures (Requirement 4.2 — route_failures history)
             # Each consecutive failure shaves off enough from the score that a
@@ -652,6 +737,12 @@ class ReconAgent(BaseAgent):
                             observation=f".env file accessible ({len(text)} bytes)",
                         )
 
+                    # --- Parse robots.txt for hidden paths ---
+                    if path == "/robots.txt" and "disallow" in text_lower:
+                        # Skip if response looks like HTML (catch-all page)
+                        if "<html" not in text_lower and "<body" not in text_lower:
+                            self._parse_robots_txt(text)
+
                     # --- Route fingerprinting from response content ---
                     if path == "/":
                         self._fingerprint_route_hints(text, text_lower, resp)
@@ -862,6 +953,124 @@ class ReconAgent(BaseAgent):
                 route="auth_logic", score=0.85, source="recon_fingerprint",
                 observation="Secret/hidden PHP page linked (likely header auth challenge)",
             )
+
+        # NoSQL: Express/MongoDB indicators suggest NoSQL injection
+        powered_by = headers.get("X-Powered-By", "").lower()
+        if "express" in powered_by:
+            self.blackboard.add_evidence(
+                route="nosql", score=0.85, source="recon_fingerprint",
+                observation="Express server detected (X-Powered-By header) — NoSQL likely",
+            )
+        # NoSQL: page mentions MongoDB, fetch('/api/login'), or JSON login
+        if any(sig in text_lower for sig in [
+            "mongodb", "mongoose", "nosql",
+            "fetch('/api/login'", 'fetch("/api/login"',
+            "application/json", "content-type.*json",
+        ]):
+            self.blackboard.add_evidence(
+                route="nosql", score=0.85, source="recon_fingerprint",
+                observation="MongoDB/JSON API indicators in page content",
+            )
+
+    def _parse_robots_txt(self, robots_content: str) -> None:
+        """Parse robots.txt Disallow entries and try to authenticate on discovered paths.
+
+        For each Disallow path that looks like a hidden admin/secret panel:
+        1. Record it as a discovered endpoint on the blackboard
+        2. Add auth_logic evidence (hidden panel likely needs auth bypass)
+        3. Attempt default credential login directly (for chain challenges)
+        """
+        import re
+        from urllib.parse import urljoin
+
+        discovered_paths = []
+        for line in robots_content.splitlines():
+            line = line.strip()
+            if line.lower().startswith("disallow:"):
+                path = line.split(":", 1)[1].strip()
+                if path and path != "/":
+                    if not path.startswith("/"):
+                        path = "/" + path
+                    discovered_paths.append(path)
+
+        if not discovered_paths:
+            return
+
+        # Record evidence for auth_logic route
+        self.blackboard.add_evidence(
+            route="auth_logic",
+            score=0.9,
+            source="recon_robots_txt",
+            observation=f"robots.txt reveals hidden paths: {discovered_paths}",
+        )
+
+        # Try to access each discovered path and attempt default credentials
+        default_creds = [
+            ("admin", "admin123"),
+            ("admin", "admin"),
+            ("admin", "password"),
+        ]
+
+        for path in discovered_paths[:5]:  # Limit to 5 paths
+            try:
+                # GET the path first
+                url = self.target_url + path
+                resp = self.session.get(url, timeout=8, allow_redirects=False)
+
+                # Check for flag directly
+                if resp.status_code == 200 and resp.text:
+                    flag = self.blackboard.check_and_record_flag(
+                        resp.text, source=f"recon_robots_path:{path}"
+                    )
+                    if flag:
+                        return
+
+                # If we get a login form (401 or form in response), try default creds
+                has_login_form = (
+                    resp.status_code == 401
+                    or (resp.status_code == 200 and "<form" in resp.text.lower())
+                )
+                if has_login_form:
+                    # Try POST with default credentials on the path itself
+                    for username, password in default_creds:
+                        login_url = url.rstrip("/") + "/login"
+                        try:
+                            login_resp = self.session.post(
+                                login_url,
+                                data={"username": username, "password": password},
+                                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                                timeout=8,
+                                allow_redirects=False,
+                            )
+                            if login_resp.status_code == 200 and login_resp.text:
+                                flag = self.blackboard.check_and_record_flag(
+                                    login_resp.text, source=f"recon_default_creds:{path}"
+                                )
+                                if flag:
+                                    return
+                        except Exception:
+                            pass
+
+                        # Also try POST directly on the discovered path
+                        try:
+                            direct_resp = self.session.post(
+                                url,
+                                data={"username": username, "password": password},
+                                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                                timeout=8,
+                                allow_redirects=False,
+                            )
+                            if direct_resp.status_code == 200 and direct_resp.text:
+                                flag = self.blackboard.check_and_record_flag(
+                                    direct_resp.text, source=f"recon_default_creds:{path}"
+                                )
+                                if flag:
+                                    return
+                        except Exception:
+                            pass
+
+            except Exception:
+                pass
 
     def _follow_interesting_links(self) -> Dict[str, Any]:
         """Follow links discovered during scan that might contain flags directly.
@@ -1704,9 +1913,21 @@ class MultiAgentOrchestrator:
         flag_format: str = r"flag\{[^}]+\}",
         max_rounds: int = 15,
         session: Optional[requests.Session] = None,
+        hints: Optional[List[str]] = None,
+        hint_schedule: Optional[Dict[str, int]] = None,
+        hints_enabled: bool = False,
     ):
         self.target_url = target_url.rstrip("/")
         self.flag_format = flag_format
+
+        # Hint injection support (Requirements 13.2, 13.5, 13.6)
+        self._hint_injector: Optional[HintInjector] = None
+        if hints and hint_schedule:
+            self._hint_injector = HintInjector(
+                hints=hints,
+                schedule=hint_schedule,
+                enabled=hints_enabled,
+            )
 
         # Shared blackboard
         self.blackboard = WebStateBlackboard(target_url=target_url, flag_format=flag_format)
@@ -1726,11 +1947,52 @@ class MultiAgentOrchestrator:
         When max_rounds is exhausted without a verified flag (Requirement 4.6):
           - Returns highest-confidence candidate flag if any exist
           - Otherwise returns (False, None, action_log)
+
+        Hint injection (Requirements 13.2, 13.5, 13.6):
+          - When a HintInjector is configured and the stall threshold is reached,
+            the next-level hint is injected into the agent's prompt context.
+          - hints_used and first_hint_round are recorded in the action_log metadata.
         """
         action_log: List[Dict[str, Any]] = []
+        _last_flag_count = len(self.blackboard.candidate_flags)
+        _stall_rounds = 0
 
         for round_num in range(1, max_rounds + 1):
             log.info("Multi-agent round %d/%d", round_num, max_rounds)
+
+            # --- Hint injection: detect stall and inject hint if available ---
+            current_flag_count = len(self.blackboard.candidate_flags)
+            if current_flag_count > _last_flag_count:
+                # Progress detected — reset stall counter
+                _stall_rounds = 0
+                _last_flag_count = current_flag_count
+            else:
+                _stall_rounds += 1
+
+            hint_text: Optional[str] = None
+            if self._hint_injector and _stall_rounds > 0:
+                hint_text = self._hint_injector.get_hint_for_round(round_num)
+                if hint_text:
+                    # Inject hint into blackboard as a high-priority observation
+                    self.blackboard.add_evidence(
+                        route="hint",
+                        score=0.8,
+                        source="hint_injector",
+                        observation=hint_text,
+                    )
+                    action_log.append({
+                        "round": round_num,
+                        "phase": "hint_injection",
+                        "agent": "hint_injector",
+                        "hint_level": self._hint_injector.injected_level,
+                        "hint_text": hint_text,
+                    })
+                    log.info(
+                        "Hint injected at round %d (level %d): %s",
+                        round_num,
+                        self._hint_injector.injected_level,
+                        hint_text[:80],
+                    )
 
             # Phase 1: Coordinator decides
             coord_decision = self.coordinator.decide()
@@ -1745,6 +2007,7 @@ class MultiAgentOrchestrator:
             if coord_decision.next_action.get("action") == "stop":
                 flags = self.blackboard.candidate_flags
                 best_flag = flags[0].value if flags else None
+                self._append_hint_summary(action_log)
                 return True, best_flag, action_log
 
             # Phase 2: Execute based on delegation
@@ -1792,6 +2055,7 @@ class MultiAgentOrchestrator:
 
                 # Stop if flag verified
                 if outcome["stop"]:
+                    self._append_hint_summary(action_log)
                     return True, outcome["flag"], action_log
 
                 # Handle handoff — set next route hint for coordinator
@@ -1809,11 +2073,13 @@ class MultiAgentOrchestrator:
             # Check for flag in execution result (fallback)
             if exec_result.get("found_flag"):
                 flag = exec_result.get("flag")
+                self._append_hint_summary(action_log)
                 return True, flag, action_log
 
             # Check for flag candidates found during recon or exploit
             for flag_candidate in self.blackboard.candidate_flags:
                 if flag_candidate.confidence >= 0.8:
+                    self._append_hint_summary(action_log)
                     return True, flag_candidate.value, action_log
 
             # Phase 4: Critic reviews
@@ -1840,6 +2106,7 @@ class MultiAgentOrchestrator:
             # Check for flag candidates after critic review
             for flag_candidate in self.blackboard.candidate_flags:
                 if flag_candidate.confidence >= 0.8:
+                    self._append_hint_summary(action_log)
                     return True, flag_candidate.value, action_log
 
         # Requirement 4.6: max_rounds exhausted — graceful degradation
@@ -1873,6 +2140,7 @@ class MultiAgentOrchestrator:
                     "agent": "exploit",
                     "result_summary": f"LLM fallback found flag: {llm_flag[:40]}",
                 })
+                self._append_hint_summary(action_log)
                 return True, llm_flag, action_log
 
         # Return highest-confidence candidate flag if any exist
@@ -1887,9 +2155,43 @@ class MultiAgentOrchestrator:
                     best_candidate.confidence,
                     best_candidate.value,
                 )
+                self._append_hint_summary(action_log)
                 return False, best_candidate.value, action_log
 
+        self._append_hint_summary(action_log)
+        self._append_hint_summary(action_log)
         return False, None, action_log
+
+    def _append_hint_summary(self, action_log: List[Dict[str, Any]]) -> None:
+        """Append hint usage summary to action_log for benchmark reporting.
+
+        Records hints_used and first_hint_round so that Benchmark_Report can
+        attribute hint-assisted solves correctly (Requirement 13.6).
+        """
+        hints_used = 0
+        first_hint_round: Optional[int] = None
+        if self._hint_injector:
+            hints_used = self._hint_injector.hints_used
+            first_hint_round = self._hint_injector.first_hint_round
+        action_log.append({
+            "phase": "hint_summary",
+            "hints_used": hints_used,
+            "first_hint_round": first_hint_round,
+        })
+
+    @property
+    def hints_used(self) -> int:
+        """Number of hint levels injected during the solve (Requirement 13.6)."""
+        if self._hint_injector:
+            return self._hint_injector.hints_used
+        return 0
+
+    @property
+    def first_hint_round(self) -> Optional[int]:
+        """Round number when the first hint was injected (Requirement 13.6)."""
+        if self._hint_injector:
+            return self._hint_injector.first_hint_round
+        return None
 
     def solve(
         self,
@@ -1929,6 +2231,10 @@ class MultiAgentOrchestrator:
         # Update instance state
         self.target_url = url
         self.flag_format = flag_format
+
+        # Reset hint injector state for fresh solve
+        if self._hint_injector:
+            self._hint_injector.reset()
 
         # Run the collaboration loop
         found, flag, action_log = self.run_loop(max_rounds=max_rounds)

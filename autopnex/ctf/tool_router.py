@@ -283,6 +283,71 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "blind_sqli_extract",
+            "description": (
+                "Extract data via blind SQL injection (time-based or boolean-based). "
+                "Uses binary search for efficiency."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "injection_point": {
+                        "type": "string",
+                        "description": "URL with injection point marked as {INJECT}",
+                    },
+                    "param_name": {
+                        "type": "string",
+                        "description": "Parameter name being injected",
+                    },
+                    "query_template": {
+                        "type": "string",
+                        "description": "SQL query template with {CHAR} and {POS} placeholders",
+                    },
+                    "mode": {
+                        "type": "string",
+                        "enum": ["time", "boolean"],
+                        "description": "Extraction mode",
+                    },
+                    "max_length": {
+                        "type": "integer",
+                        "description": "Maximum characters to extract (default: 64)",
+                    },
+                },
+                "required": ["injection_point", "param_name", "query_template"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "waf_bypass_generate",
+            "description": (
+                "Generate WAF bypass payloads. Tries static mutations first, "
+                "falls back to LLM generation."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "blocked_payload": {
+                        "type": "string",
+                        "description": "The payload that was blocked by the WAF",
+                    },
+                    "waf_response": {
+                        "type": "string",
+                        "description": "The WAF's response body (first 500 chars)",
+                    },
+                    "vulnerability_class": {
+                        "type": "string",
+                        "description": "Target vulnerability type (sqli, xss, lfi, ssti, cmdi)",
+                    },
+                },
+                "required": ["blocked_payload", "waf_response", "vulnerability_class"],
+            },
+        },
+    },
 ]
 
 CORE_TOOL_NAMES = {
@@ -298,6 +363,8 @@ CORE_TOOL_NAMES = {
     "download_tool_url",
     "recon_scan",
     "repl_execute",
+    "blind_sqli_extract",
+    "waf_bypass_generate",
 }
 
 DEFAULT_CTF_TOOL_NAMES = {
@@ -534,6 +601,8 @@ class ToolRouter:
         session: requests.Session,
         challenge_type: Optional[str] = None,
         enabled_tools: Optional[Set[str]] = None,
+        cancel_event: Optional[Any] = None,
+        budget_remaining: Optional[int] = None,
     ):
         self.runtime_config = runtime_config
         self.flag_engine = flag_engine
@@ -542,6 +611,8 @@ class ToolRouter:
         self.session = session
         self.challenge_type = challenge_type
         self.enabled_tools = enabled_tools or CORE_TOOL_NAMES.copy()
+        self.cancel_event = cancel_event
+        self.budget_remaining = budget_remaining
 
     # -- schema exposure ---------------------------------------------------
 
@@ -643,6 +714,65 @@ class ToolRouter:
                 if not code.strip():
                     return {"error": "No code provided", "success": False, "stdout": "", "stderr": "", "variables": []}
                 return self._repl.execute(code)
+            elif name == "blind_sqli_extract":
+                # Check cancellation before executing long-running specialist tool
+                if self.cancel_event and self.cancel_event.is_set():
+                    return {"error": "Cancelled: cancel_event is set"}
+                # Check per-worker budget before executing specialist tool
+                if self.budget_remaining is not None and self.budget_remaining <= 0:
+                    return {"error": "Budget exhausted: no remaining budget for specialist tool"}
+                from .phase2_tools import BlindSQLiExtractor
+                extractor = BlindSQLiExtractor(
+                    session=self.session,
+                    target_url=args.get("injection_point", ""),
+                    flag_engine=self.flag_engine,
+                )
+                result = extractor.extract(
+                    injection_point=args.get("injection_point", ""),
+                    param_name=args.get("param_name", ""),
+                    query_template=args.get("query_template", ""),
+                    mode=args.get("mode", "time"),
+                    max_length=int(args.get("max_length", 64)),
+                )
+                return {
+                    "success": result.success,
+                    "extracted_value": result.extracted_value,
+                    "unknown_positions": result.unknown_positions,
+                    "mode_used": result.mode_used,
+                    "requests_made": result.requests_made,
+                    "flag_validated": result.flag_validated,
+                }
+            elif name == "waf_bypass_generate":
+                # Check cancellation before executing specialist tool
+                if self.cancel_event and self.cancel_event.is_set():
+                    return {"error": "Cancelled: cancel_event is set"}
+                # Check per-worker budget before executing specialist tool
+                if self.budget_remaining is not None and self.budget_remaining <= 0:
+                    return {"error": "Budget exhausted: no remaining budget for specialist tool"}
+                from .phase2_tools import WAFBypassGenerator
+                # Obtain LLM client from runtime_config if available
+                llm_client = None
+                if (
+                    hasattr(self.runtime_config, "deepseek_api_key")
+                    and self.runtime_config.deepseek_api_key
+                ):
+                    from ..orchestrator.llm_client import LLMClient
+                    llm_client = LLMClient(runtime_config=self.runtime_config)
+                generator = WAFBypassGenerator(
+                    llm_client=llm_client,
+                    max_llm_rounds=3,
+                )
+                result = generator.generate_bypass(
+                    blocked_payload=args.get("blocked_payload", ""),
+                    waf_response=args.get("waf_response", ""),
+                    vulnerability_class=args.get("vulnerability_class", ""),
+                )
+                return {
+                    "alternatives": result.alternatives,
+                    "source": result.source,
+                    "llm_rounds_used": result.llm_rounds_used,
+                    "cached": result.cached,
+                }
             elif ToolRegistry.get(name):
                 registry_args = self.normalise_registry_args(name, args)
                 result = ToolRegistry.execute(name, registry_args, runtime_config=self.runtime_config)

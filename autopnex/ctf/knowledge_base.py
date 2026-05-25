@@ -82,34 +82,53 @@ class CTFKnowledgeBase:
         self._seed_high_value_experience()
 
     def _load_from_file(self) -> None:
-        """从持久化 JSON 文件加载解题记录。"""
+        """从持久化 JSON 文件加载解题记录。
+
+        Uses the unified schema layer (knowledge_schema) to transparently
+        handle both old-format and new-format files.
+        """
         if self.storage_path is None or not self.storage_path.exists():
             return
         try:
-            with self.storage_path.open(encoding="utf-8") as f:
-                data = json.load(f)
+            from .knowledge_schema import load_knowledge
+            data = load_knowledge(self.storage_path)
             self.solve_records = data.get("solve_records", [])
             self.attempt_records = data.get("attempt_records", [])
             # 允许文件中覆盖内置 Payload 和模式
             if "payloads" in data:
                 self.payloads.update(data["payloads"])
-            if "patterns" in data:
+            if "patterns" in data and isinstance(data["patterns"], dict):
+                # Only merge if patterns is a dict (builtin format)
+                # The unified schema uses patterns as a list (KnowledgeLearner format)
                 self.patterns.update(data["patterns"])
         except (json.JSONDecodeError, OSError) as exc:
             log.warning("无法从文件加载知识库: %s", exc)
 
     def _persist(self) -> None:
-        """将当前状态持久化到 JSON 文件。"""
+        """将当前状态持久化到 JSON 文件。
+
+        Preserves all unified schema fields (including new fields like
+        route_weights, fast_payloads, fingerprint_route_map) so that
+        other consumers (KnowledgeLearner, ExperienceWriter) don't lose
+        their data when CTFKnowledgeBase writes.
+        """
         if self.storage_path is None:
             return
         try:
-            self.storage_path.parent.mkdir(parents=True, exist_ok=True)
-            data = {
-                "solve_records": self.solve_records,
-                "attempt_records": self.attempt_records[-500:],
-            }
-            with self.storage_path.open("w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
+            from .knowledge_schema import load_knowledge, save_knowledge
+
+            # Load existing data to preserve fields we don't manage
+            if self.storage_path.exists():
+                existing = load_knowledge(self.storage_path)
+            else:
+                from .knowledge_schema import empty_knowledge
+                existing = empty_knowledge()
+
+            # Update only the fields CTFKnowledgeBase manages
+            existing["solve_records"] = self.solve_records
+            existing["attempt_records"] = self.attempt_records[-500:]
+
+            save_knowledge(existing, self.storage_path)
         except OSError as exc:
             log.error("持久化知识库失败: %s", exc)
 

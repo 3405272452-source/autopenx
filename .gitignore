@@ -98,6 +98,21 @@ Thumbs.db
 _fix_init.py
 _test_profile.py
 _write_init.py
+_verify_proto.py
+test_proto_merge.py
+verify_phase_d.py
+test_output.txt
+
+# ---------------------------------------------------------------------------
+# Test files (excluded from main push per user request)
+# ---------------------------------------------------------------------------
+tests/
+
+# ---------------------------------------------------------------------------
+# Results and plan files
+# ---------------------------------------------------------------------------
+ctf_knowledge.json
+MagicMock/
 
 # ---------------------------------------------------------------------------
 # Misc generated
@@ -109,4 +124,9 @@ _write_init.py
 .ruff_cache/
 
 pytest-of-*/
+
+# ---------------------------------------------------------------------------
+# Development plans and upgrade recommendations (private)
+# ---------------------------------------------------------------------------
+docs/plans/
 

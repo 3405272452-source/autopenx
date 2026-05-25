@@ -17,19 +17,24 @@ Design principles:
 
 from __future__ import annotations
 
-import json
 import logging
 import time
 from pathlib import Path
 from typing import List, Optional
+
+from .knowledge_schema import (
+    SCHEMA_VERSION,
+    load_knowledge,
+    save_knowledge,
+)
 
 log = logging.getLogger("autopnex.ctf.knowledge_learner")
 
 # Default knowledge file location (project root)
 _DEFAULT_KNOWLEDGE_PATH = Path(__file__).resolve().parent.parent.parent / "ctf_knowledge.json"
 
-# Current schema version
-_SCHEMA_VERSION = 2
+# Current schema version (delegated to knowledge_schema module)
+_SCHEMA_VERSION = SCHEMA_VERSION
 
 
 class KnowledgeLearner:
@@ -64,40 +69,23 @@ class KnowledgeLearner:
     def _load(self) -> dict:
         """Load existing knowledge base from disk.
 
+        Uses the unified schema migration layer (knowledge_schema module)
+        to transparently handle old-format files with solve_records /
+        attempt_records and migrate them to the current schema.
+
         Returns a valid knowledge structure even if the file doesn't exist
         or is malformed.
         """
-        empty: dict = {
-            "version": _SCHEMA_VERSION,
-            "patterns": [],
-            "solve_history": [],
-        }
-        if not self.knowledge_path.exists():
-            return empty
-        try:
-            with self.knowledge_path.open("r", encoding="utf-8") as f:
-                data = json.load(f)
-            # Migrate from older formats
-            if not isinstance(data, dict):
-                return empty
-            if "patterns" not in data:
-                data["patterns"] = []
-            if "solve_history" not in data:
-                data["solve_history"] = []
-            data["version"] = _SCHEMA_VERSION
-            return data
-        except (json.JSONDecodeError, OSError, ValueError) as exc:
-            log.warning("Failed to load knowledge base from %s: %s", self.knowledge_path, exc)
-            return empty
+        return load_knowledge(self.knowledge_path)
 
     def _save(self) -> None:
-        """Save knowledge base to disk. Creates parent directories if needed."""
-        try:
-            self.knowledge_path.parent.mkdir(parents=True, exist_ok=True)
-            with self.knowledge_path.open("w", encoding="utf-8") as f:
-                json.dump(self._knowledge, f, ensure_ascii=False, indent=2)
-        except OSError as exc:
-            log.error("Failed to save knowledge base to %s: %s", self.knowledge_path, exc)
+        """Save knowledge base to disk.
+
+        Uses the unified save_knowledge() helper which performs atomic
+        writes and preserves both old and new schema fields for backward
+        compatibility.
+        """
+        save_knowledge(self._knowledge, self.knowledge_path)
 
     # ------------------------------------------------------------------
     # Recording successful solves

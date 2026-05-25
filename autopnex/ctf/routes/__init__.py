@@ -26,6 +26,7 @@ from autopnex.ctf.routes.registry import (
 # Import new machines to trigger their registration in MACHINE_REGISTRY
 from autopnex.ctf.routes.xxe import XXEMachine  # noqa: F401
 from autopnex.ctf.routes.auth_logic import AuthLogicMachine  # noqa: F401
+from autopnex.ctf.routes.nosql import NoSQLRouteStateMachine  # noqa: F401
 
 __all__ = [
     "ProbeResult",
@@ -40,4 +41,5 @@ __all__ = [
     "run_route",
     "XXEMachine",
     "AuthLogicMachine",
+    "NoSQLRouteStateMachine",
 ]

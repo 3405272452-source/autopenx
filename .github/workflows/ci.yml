@@ -37,7 +37,6 @@ jobs:
           --hypothesis-profile=ci \
           -p no:cacheprovider \
           --timeout=30
-      continue-on-error: true
 
     - name: Run regression tests
       run: |
@@ -67,7 +66,6 @@ jobs:
     - run: pip install -r requirements.txt
     - name: Run security boundary tests
       run: python -m pytest tests/test_security_boundaries.py -v --tb=short -p no:cacheprovider
-      continue-on-error: true
 
   e2e-baseline:
     runs-on: ubuntu-latest
