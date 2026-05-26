@@ -684,7 +684,7 @@ class ReconAgent(BaseAgent):
         for path in self.COMMON_PATHS:
             try:
                 url = self.target_url + path
-                resp = self.session.get(url, timeout=10, allow_redirects=False)
+                resp = self.session.get(url, timeout=5, allow_redirects=False)
                 finding = {
                     "path": path,
                     "status": resp.status_code,

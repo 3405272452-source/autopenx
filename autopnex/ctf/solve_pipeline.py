@@ -106,15 +106,15 @@ class PipelineConfig:
         hints_enabled: Whether hint injection is active during solving.
     """
 
-    # Phase 1 (StallDetector)
-    stall_window: int = 5
-    phase1_max_rounds: int = 20
+    # Phase 1 (StallDetector) — keep short to hand off to LLM quickly
+    stall_window: int = 2
+    phase1_max_rounds: int = 5
 
-    # Phase 2
+    # Phase 2 — generous budget for LLM autonomous solving
     phase2_worker_count: int = 3
-    phase2_max_turns_per_worker: int = 10
-    phase2_wall_clock_timeout_seconds: float = 120.0
-    max_tokens_per_worker: int = 8000
+    phase2_max_turns_per_worker: int = 30
+    phase2_wall_clock_timeout_seconds: float = 300.0
+    max_tokens_per_worker: int = 1000000  # DeepSeek V4 Pro supports 1M context natively
 
     # Phase 3
     phase3_max_iterations: int = 30
@@ -137,7 +137,7 @@ class PipelineConfig:
     phase1_mode: str = "hybrid"
 
     # Parallel scan configuration
-    parallel_scan_timeout: float = 30.0
+    parallel_scan_timeout: float = 15.0
     parallel_scan_max_requests: int = 100
 
     # Phase 2 dynamic worker configuration
@@ -149,6 +149,13 @@ class PipelineConfig:
 
     # Fast-track payload limit per route
     fast_track_max_payloads: int = 3
+
+    # Fast-track direct solve: for simple challenges (source visible + single vuln),
+    # skip Phase 0-1 and let one worker with large token budget solve directly.
+    # Triggered when initial GET reveals source code with clear vulnerability.
+    fast_track_direct_solve: bool = True
+    fast_track_token_budget: int = 64000
+    fast_track_max_turns: int = 25
 
     # --- Backward-compatible aliases (deprecated) ---
     # These map to the old PipelineConfig fields used by test_medium_ctf.py.
@@ -447,10 +454,28 @@ class CTFSolvePipeline:
         start_time = time.time()
 
         # ---------------------------------------------------------------
+        # Fast-Track Direct Solve: For simple challenges where source code
+        # is visible and contains a clear single vulnerability, skip the
+        # entire Phase 0-1 pipeline and let one LLM worker solve directly
+        # with a large token budget.
+        # ---------------------------------------------------------------
+        if self.config.fast_track_direct_solve and self._is_llm_available():
+            fast_result = await self._try_fast_track_direct(start_time)
+            if fast_result is not None:
+                return fast_result
+
+        # ---------------------------------------------------------------
         # Phase 0: Knowledge matching + target fingerprint collection
         # ---------------------------------------------------------------
         log.info("[progress_event] phase0_knowledge_match: starting")
         log.info("CTFSolvePipeline: starting Phase 0 (knowledge matching)")
+
+        # Quick connectivity pre-check (3s timeout) to fail fast
+        try:
+            import requests as _req
+            _req.head(self.target, timeout=3, allow_redirects=True)
+        except Exception as _conn_err:
+            log.warning("Target connectivity check failed (will continue): %s", _conn_err)
 
         self.knowledge_learner: Optional[Any] = None
         self.phase0_match: Optional[Dict[str, Any]] = None
@@ -559,6 +584,19 @@ class CTFSolvePipeline:
                 # Write scan results to blackboard
                 if self.blackboard is not None:
                     scan.write_to_blackboard(self.blackboard, scan_output)
+
+                # Capture main page source for LLM workers to analyze
+                try:
+                    import requests as _req
+                    page_session = self.session if self.session else _req.Session()
+                    page_resp = page_session.get(
+                        self.target or "", timeout=8, allow_redirects=True
+                    )
+                    if page_resp.status_code == 200 and self.blackboard is not None:
+                        self.blackboard.page_source = page_resp.text[:3000]
+                        log.info("Captured page source (%d chars) for LLM workers", len(page_resp.text))
+                except Exception as exc:
+                    log.debug("Failed to capture page source: %s", exc)
 
                 log.info(
                     "ParallelRouteScan complete: %d routes, %d above threshold, "
@@ -949,6 +987,126 @@ class CTFSolvePipeline:
         )
         self._write_experience(result)
         return result
+
+    async def _try_fast_track_direct(self, start_time: float) -> Optional[SolveResult]:
+        """Fast-track: fetch page, detect simple vuln, let one LLM solve directly.
+
+        For challenges where source code is visible and contains a clear
+        single vulnerability (deserialization, command injection, SSTI, etc.),
+        skip the entire multi-phase pipeline and give one LLM worker full
+        autonomy with a large token budget.
+
+        Returns SolveResult if solved, None if fast-track is not applicable.
+        """
+        import requests as _req
+
+        try:
+            # Step 1: Quick GET to fetch page source
+            session = self.session or _req.Session()
+            resp = session.get(self.target or "", timeout=10, allow_redirects=True)
+            if resp.status_code != 200:
+                return None
+
+            page_source = resp.text
+            if len(page_source) < 50:
+                return None
+
+            # Step 2: Detect if this is a "source visible + single vuln" challenge
+            vuln_type = self._detect_simple_vuln(page_source)
+            if vuln_type is None:
+                return None
+
+            log.info(
+                "Fast-track direct solve triggered: detected %s vulnerability in page source",
+                vuln_type,
+            )
+
+            # Step 3: Launch single LLM worker with large budget
+            from autopnex.ctf.phase2_runner import Phase2Runner, Phase2Result, WorkerAssignment
+
+            # Create a minimal config for the fast-track worker
+            fast_config = PipelineConfig(
+                phase2_worker_count=1,
+                phase2_max_turns_per_worker=self.config.fast_track_max_turns,
+                phase2_wall_clock_timeout_seconds=240.0,
+                max_tokens_per_worker=self.config.fast_track_token_budget,
+                phase2_dynamic_workers=False,
+                strategy_pool=[vuln_type],
+            )
+
+            # Create a blackboard with the page source
+            from autopnex.ctf.web_state_blackboard import WebStateBlackboard
+            bb = WebStateBlackboard(target_url=self.target or "")
+            bb.page_source = page_source
+
+            runner = Phase2Runner(
+                config=fast_config,
+                blackboard=bb,
+                session=session,
+                flag_engine=self.flag_engine,
+                runtime_config=self.runtime_config,
+                scan_output=None,
+            )
+
+            phase2_result: Phase2Result = runner.run()
+
+            if phase2_result.success and phase2_result.flag:
+                duration_ms = (time.time() - start_time) * 1000
+                from autopnex.ctf.attribution import Attribution as Attr
+
+                result = SolveResult(
+                    success=True,
+                    flag=phase2_result.flag,
+                    solving_phase="fast_track",
+                    duration_ms=duration_ms,
+                    phase2_turns=phase2_result.total_turns,
+                    attribution=Attr(solving_phase="fast_track"),
+                    upgrade_events=[{"from": "fast_track", "to": "done", "reason": vuln_type}],
+                )
+                self._write_experience(result)
+                log.info("Fast-track solved in %.1fs! Flag: %s", duration_ms / 1000, phase2_result.flag)
+                return result
+
+            # Fast-track didn't solve it — fall through to normal pipeline
+            log.info("Fast-track did not find flag (%d turns). Falling back to full pipeline.", phase2_result.total_turns)
+            return None
+
+        except Exception as exc:
+            log.debug("Fast-track direct solve failed (non-fatal): %s", exc)
+            return None
+
+    def _detect_simple_vuln(self, page_source: str) -> Optional[str]:
+        """Detect if page source reveals a simple, single vulnerability.
+
+        Returns the vulnerability type string if detected, None otherwise.
+        Only triggers for clear, unambiguous cases where the source code
+        is directly visible and contains an obvious entry point.
+        """
+        source_lower = page_source.lower()
+
+        # PHP deserialization: unserialize() with user input
+        if "unserialize" in source_lower and ("$_post" in source_lower or "$_get" in source_lower or "$_request" in source_lower):
+            return "deserialization"
+
+        # Command injection: exec/system/passthru/shell_exec with user input
+        for func in ("exec(", "system(", "passthru(", "shell_exec(", "popen("):
+            if func in source_lower and ("$_" in source_lower):
+                return "cmdi"
+
+        # SSTI: render/template with user input
+        if ("render" in source_lower or "template" in source_lower) and ("{{" in page_source or "{%" in page_source):
+            return "ssti"
+
+        # eval() with user input
+        if "eval(" in source_lower and "$_" in source_lower:
+            return "cmdi"
+
+        # include/require with user input (LFI)
+        for func in ("include(", "require(", "include_once(", "require_once("):
+            if func in source_lower and "$_" in source_lower:
+                return "lfi"
+
+        return None
 
     def _write_experience(self, result: SolveResult) -> None:
         """Record solve/failure experience via ExperienceWriter.

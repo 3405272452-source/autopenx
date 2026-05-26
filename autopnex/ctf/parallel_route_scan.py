@@ -161,9 +161,9 @@ class ParallelRouteScan:
         target_url: str,
         session: requests.Session,
         knowledge_learner: Optional[KnowledgeLearner] = None,
-        timeout: float = 30.0,
+        timeout: float = 15.0,
         max_requests: int = 100,
-        single_route_timeout: float = 8.0,
+        single_route_timeout: float = 4.0,
     ):
         self.target_url = target_url.rstrip("/")
         self.session = session
