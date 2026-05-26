@@ -293,6 +293,23 @@ async def job_report_html(job_id: str):
 
 UPLOAD_BASE = Path(__file__).parent.parent.parent / "uploads"
 
+
+def _inject_challenge_context(agent, hint: Optional[str], title: Optional[str]) -> None:
+    """Inject challenge hint/title into the agent's blackboard as challenge_context."""
+    parts = []
+    if title:
+        parts.append(f"题目名称: {title}")
+    if hint:
+        parts.append(f"题目提示: {hint}")
+    context_str = "\n".join(parts)
+    if hasattr(agent, "blackboard") and agent.blackboard is not None:
+        agent.blackboard.challenge_context = context_str
+    elif hasattr(agent, "_blackboard") and agent._blackboard is not None:
+        agent._blackboard.challenge_context = context_str
+    else:
+        # Fallback: store on agent itself for prompt_compiler to pick up
+        agent._challenge_context = context_str
+
 # Magic bytes signatures for file type detection
 _MAGIC_SIGNATURES: List[tuple] = [
     (b"\x89PNG\r\n\x1a\n", "image/png"),
@@ -407,6 +424,9 @@ class CTFSolveRequest(BaseModel):
     max_attempts: int = 10
     timeout: int = 600
     thinking_mode: bool = True
+    hint: Optional[str] = None
+    title: Optional[str] = None
+    multi_agent: bool = True
     scan_mode: Optional[str] = None
     allow_external_tools: Optional[bool] = None
     allow_local_targets: Optional[bool] = None
@@ -496,12 +516,16 @@ async def ctf_solve(req: CTFSolveRequest):
             enabled_tools=req.enabled_tools,
             runtime_config=runtime,
             knowledge_base_path=str(Path(__file__).parent.parent.parent / "ctf_knowledge.json"),
-            multi_agent=True,  # Hybrid: deterministic routes first, then LLM ReAct fallback
+            multi_agent=req.multi_agent,
         )
 
         # Add uploaded files
         for fpath in req.files:
             agent.add_file(fpath)
+
+        # Inject challenge hint/title as context
+        if req.hint or req.title:
+            _inject_challenge_context(agent, req.hint, req.title)
 
         result = await agent.solve()
         return result
@@ -569,10 +593,13 @@ async def ctf_solve_events(req: CTFSolveRequest):
                 runtime_config=runtime,
                 progress_callback=push,
                 knowledge_base_path=str(Path(__file__).parent.parent.parent / "ctf_knowledge.json"),
-                multi_agent=True,  # Hybrid: deterministic routes first, then LLM ReAct fallback
+                multi_agent=req.multi_agent,
             )
             for fpath in req.files:
                 agent.add_file(fpath)
+            # Inject challenge hint/title as context
+            if req.hint or req.title:
+                _inject_challenge_context(agent, req.hint, req.title)
             result = asyncio.run(agent.solve())
             push({"event": "ctf_complete", "result": result})
         except Exception as exc:  # noqa: BLE001

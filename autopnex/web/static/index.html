@@ -199,12 +199,20 @@
               </select>
             </div>
             <div class="form-group">
+              <span class="label">题目名称（可选）</span>
+              <input type="text" id="ctf-title" placeholder="如：EasySQL、WarmUp" />
+            </div>
+            <div class="form-group">
+              <span class="label">题目提示 / 描述（可选）</span>
+              <input type="text" id="ctf-hint" placeholder="如：注意源码泄露、inject me plz" />
+            </div>
+            <div class="form-group">
               <span class="label">Flag 格式</span>
               <input type="text" id="ctf-flag-format" placeholder="flag{...}" value="flag{...}" />
             </div>
             <div class="form-group">
               <span class="label">最大尝试次数: <strong id="ctf-attempts-val">10</strong></span>
-              <input type="range" id="ctf-max-attempts" min="1" max="20" value="10" oninput="document.getElementById('ctf-attempts-val').textContent=this.value" />
+              <input type="range" id="ctf-max-attempts" min="1" max="30" value="10" oninput="document.getElementById('ctf-attempts-val').textContent=this.value" />
             </div>
             <div class="form-group">
               <span class="label">超时时间: <strong id="ctf-timeout-val">600</strong>s</span>
@@ -212,6 +220,7 @@
             </div>
           </div>
           <label class="checkbox-row"><input type="checkbox" id="ctf-thinking-mode" checked /> 启用 Thinking 模式（深度推理）</label>
+          <label class="checkbox-row"><input type="checkbox" id="ctf-multi-agent" checked /> 启用多智能体协作（状态机 + 并行 Worker）</label>
         </div>
 
         <!-- Solve Button -->

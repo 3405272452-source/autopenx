@@ -967,6 +967,9 @@
     const maxAttempts = parseInt(document.getElementById("ctf-max-attempts").value, 10) || 10;
     const timeout = parseInt(document.getElementById("ctf-timeout").value, 10) || 600;
     const thinkingMode = document.getElementById("ctf-thinking-mode").checked;
+    const multiAgent = document.getElementById("ctf-multi-agent").checked;
+    const hint = (document.getElementById("ctf-hint") || {}).value || "";
+    const title = (document.getElementById("ctf-title") || {}).value || "";
 
     const payload = {
       target: target.trim().startsWith("http") ? target.trim() : "http://" + target.trim(),
@@ -977,6 +980,9 @@
       max_attempts: maxAttempts,
       timeout: timeout,
       thinking_mode: thinkingMode,
+      multi_agent: multiAgent,
+      hint: hint.trim() || null,
+      title: title.trim() || null,
       scan_mode: (state.settings && state.settings.scan_mode) || "active",
       allow_external_tools: !!(state.settings && state.settings.allow_external_tools),
       allow_local_targets: !!(state.settings && state.settings.allow_local_targets),
@@ -985,6 +991,8 @@
 
     ctfAppendLog("info", "正在调用 DeepSeek v4-pro (Thinking Max)...");
     ctfAppendLog("info", "目标: " + target.trim());
+    if (hint) ctfAppendLog("info", "提示: " + hint);
+    if (title) ctfAppendLog("info", "题目: " + title);
     document.getElementById("ctf-progress-fill").style.width = "20%";
     document.getElementById("ctf-progress-text").textContent = "LLM 推理中（可能需要 1-3 分钟）…";
 
