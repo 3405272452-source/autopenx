@@ -12,6 +12,7 @@
   const telemetryStatsEl = el("telemetry-stats");
   const currentToolEl = el("current-tool");
   const phaseTasksEl = el("phase-tasks");
+  const workerSummaryGridEl = el("worker-summary-grid");
   const artifactListEl = el("artifact-list");
   const settingsStatusEl = el("settings-status");
   const llmChatEl = el("llm-chat");
@@ -28,6 +29,7 @@
     findings: [],
     artifacts: [],
     phaseTasks: {},
+    workerSummaries: {},
     eventSource: null,
     settings: null,
     approvalToken: null,
@@ -190,6 +192,7 @@
       renderCapabilities(data.capabilities || []);
       await loadHealth();
       await loadSettings();
+      await loadCTFTools();
     } catch (err) {
       settingsStatusEl.className = "inline-note err";
       settingsStatusEl.textContent = `保存失败: ${err}`;
@@ -264,6 +267,7 @@
     state.findings = [];
     state.artifacts = [];
     state.phaseTasks = {};
+    state.workerSummaries = {};
     stateEls.forEach((s) => s.classList.remove("active", "done"));
     llmChatEl.innerHTML = '<div class="kv-empty">等待 LLM 响应…</div>';
   }
@@ -676,6 +680,44 @@
     });
   }
 
+  function upsertWorkerCard(workerId, data) {
+    if (!workerId) return;
+    const prev = state.workerSummaries[workerId] || {};
+    state.workerSummaries[workerId] = { ...prev, ...data };
+    renderWorkerSummaries();
+  }
+
+  function renderWorkerSummaries() {
+    if (!workerSummaryGridEl) return;
+    const workers = Object.entries(state.workerSummaries);
+    workerSummaryGridEl.innerHTML = "";
+    if (!workers.length) {
+      workerSummaryGridEl.innerHTML = '<div class="kv-empty">等待 worker 分配…</div>';
+      return;
+    }
+    workers.sort((a, b) => a[0].localeCompare(b[0])).forEach(([workerId, worker]) => {
+      const card = document.createElement("div");
+      card.className = "worker-card";
+      const status = worker.status || (worker.success ? "success" : worker.cancelled ? "cancelled" : "running");
+      card.innerHTML = `
+        <div class="worker-card-header">
+          <strong>${escapeHtml(workerId)}</strong>
+          <span class="worker-status worker-status-${escapeHtml(status)}">${escapeHtml(status)}</span>
+        </div>
+        <div class="worker-card-grid">
+          <div><span>route</span><strong>${escapeHtml(worker.route || "-")}</strong></div>
+          <div><span>variant</span><strong>${escapeHtml(worker.variant || "default")}</strong></div>
+          <div><span>turns</span><strong>${escapeHtml(String(worker.turns ?? 0))}</strong></div>
+          <div><span>api</span><strong>${escapeHtml(String(worker.api_calls ?? 0))}</strong></div>
+          <div><span>tokens</span><strong>${escapeHtml(String(worker.tokens_used ?? 0))}</strong></div>
+          <div><span>cancelled</span><strong>${escapeHtml(String(!!worker.cancelled))}</strong></div>
+        </div>
+        ${worker.error ? `<div class="worker-card-error">${escapeHtml(worker.error)}</div>` : ""}
+      `;
+      workerSummaryGridEl.appendChild(card);
+    });
+  }
+
   async function ensureApprovalToken(payload) {
     const scopes = collectRequestedScopes(payload);
     if (!scopes.length || (scopes.length === 1 && scopes[0] === "passive")) {
@@ -964,8 +1006,8 @@
 
     const challengeType = document.getElementById("ctf-challenge-type").value;
     const flagFormat = document.getElementById("ctf-flag-format").value || "flag{...}";
-    const maxAttempts = parseInt(document.getElementById("ctf-max-attempts").value, 10) || 10;
-    const timeout = parseInt(document.getElementById("ctf-timeout").value, 10) || 600;
+    const maxAttempts = parseInt(document.getElementById("ctf-max-attempts").value, 10) || 30;
+    const timeout = parseInt(document.getElementById("ctf-timeout").value, 10) || 1200;
     const thinkingMode = document.getElementById("ctf-thinking-mode").checked;
     const multiAgent = document.getElementById("ctf-multi-agent").checked;
     const hint = (document.getElementById("ctf-hint") || {}).value || "";
@@ -989,12 +1031,12 @@
       exploit_enabled: !!(state.settings && state.settings.exploit_enabled),
     };
 
-    ctfAppendLog("info", "正在调用 DeepSeek v4-pro (Thinking Max)...");
+    ctfAppendLog("info", multiAgent ? "正在启动强自主解题流水线..." : "正在调用 DeepSeek v4-pro (Thinking Max)...");
     ctfAppendLog("info", "目标: " + target.trim());
     if (hint) ctfAppendLog("info", "提示: " + hint);
     if (title) ctfAppendLog("info", "题目: " + title);
     document.getElementById("ctf-progress-fill").style.width = "20%";
-    document.getElementById("ctf-progress-text").textContent = "LLM 推理中（可能需要 1-3 分钟）…";
+    document.getElementById("ctf-progress-text").textContent = "强自主推理中（难题可能需要 5-20 分钟）…";
 
     try {
       const approvalToken = await ensureApprovalToken(payload);
@@ -1009,17 +1051,17 @@
       if (data.success && data.flag) {
         flagResult.hidden = false;
         flagResult.className = "ctf-flag-result success";
-        flagResult.textContent = "🎉 Flag: " + data.flag;
+        flagResult.textContent = "[FOUND] Flag: " + data.flag;
         document.getElementById("ctf-progress-text").textContent = "解题成功!";
-        ctfAppendLog("success", "成功! Flag: " + data.flag);
+        ctfAppendLog("success", "[SUCCESS] Flag: " + data.flag);
         incrementStat("ctfSolved");
         showToast("success", "CTF 解题成功！");
       } else {
         flagResult.hidden = false;
         flagResult.className = "ctf-flag-result failure";
-        flagResult.textContent = "❌ 未找到 Flag" + (data.error ? " (" + data.error + ")" : "");
+        flagResult.textContent = "[FAILED] 未找到 Flag" + (data.error ? " (" + data.error + ")" : "");
         document.getElementById("ctf-progress-text").textContent = "解题结束 (" + (data.error || "未找到flag") + ")";
-        ctfAppendLog("error", "失败: " + (data.error || "未找到flag"));
+        ctfAppendLog("error", "[FAILED] " + (data.error || "未找到flag"));
       }
 
       // Show reasoning
@@ -1049,11 +1091,11 @@
       ctfAppendLog("error", "请求失败: " + err);
       flagResult.hidden = false;
       flagResult.className = "ctf-flag-result failure";
-      flagResult.textContent = "❌ 请求失败: " + err.message;
+      flagResult.textContent = "[ERROR] 请求失败: " + err.message;
     }
 
     solveBtn.disabled = false;
-    solveBtn.textContent = "🏁 开始解题";
+    solveBtn.textContent = "执行解题 / Start Solve";
   };
 
   async function streamCTFSolve(payload) {
@@ -1092,12 +1134,12 @@
 
   function handleCTFStreamEvent(ev) {
     if (ev.event === "ctf_start") {
-      ctfAppendLog("info", `🚀 启动 CTF Agent，工具: ${(ev.enabled_tools || []).join(", ")}`);
+      ctfAppendLog("info", ev.autonomous_pipeline ? `[START] 启动强自主流水线，工具: ${(ev.enabled_tools || []).join(", ")}` : `[START] 启动 CTF Agent，工具: ${(ev.enabled_tools || []).join(", ")}`);
       document.getElementById("ctf-progress-fill").style.width = "10%";
       document.getElementById("ctf-progress-text").textContent = "已启动，正在分析目标…";
     } else if (ev.event === "ctf_iteration_start") {
       const phase = ev.phase || "";
-      const phaseLabel = phase === "deterministic" ? "🔧 状态机探测" : "🧠 AI 推理";
+      const phaseLabel = phase === "deterministic" ? "[PROBE] 状态机探测" : "[LLM] AI 推理";
       ctfAppendLog("info", `${phaseLabel} 第 ${ev.iteration}/${ev.max_iterations} 轮`);
       const pct = Math.min(90, 15 + Math.round((ev.iteration / Math.max(ev.max_iterations || 1, 1)) * 70));
       document.getElementById("ctf-progress-fill").style.width = pct + "%";
@@ -1110,48 +1152,88 @@
         document.getElementById("ctf-thinking-section").removeAttribute("hidden");
       }
       if (ev.content) {
-        ctfAppendLog("info", `💭 [第 ${ev.iteration} 轮分析] ${ev.content.slice(0, 400)}`);
+        ctfAppendLog("info", `[ANALYSIS] [第 ${ev.iteration} 轮分析] ${ev.content.slice(0, 400)}`);
       }
       (ev.tool_calls || []).forEach((call) => {
-        ctfAppendLog("info", `📋 计划调用: ${call.name}(${String(call.arguments || "").slice(0, 150)})`);
+        ctfAppendLog("info", `[PLAN] 计划调用: ${call.name}(${String(call.arguments || "").slice(0, 150)})`);
       });
     } else if (ev.event === "ctf_tool_start") {
-      ctfAppendLog("info", `🔧 执行: ${ev.tool}(${JSON.stringify(ev.arguments || {}).slice(0, 200)})`);
+      ctfAppendLog("info", `[EXEC] 执行: ${ev.tool}(${JSON.stringify(ev.arguments || {}).slice(0, 200)})`);
     } else if (ev.event === "ctf_tool_finish") {
       const preview = String(ev.result_preview || "").slice(0, 400);
       const hasFlag = preview.toLowerCase().includes("flag{");
-      ctfAppendLog(hasFlag ? "success" : "info", `${hasFlag ? "🎯" : "📄"} ${ev.tool} → ${preview}`);
+      ctfAppendLog(hasFlag ? "success" : "info", `[RESULT] ${ev.tool} → ${preview}`);
     } else if (ev.event === "ctf_evidence_card") {
-      ctfAppendLog("info", `📊 证据: ${ev.summary || ev.route || ""} (score=${ev.score || "?"})`);
+      ctfAppendLog("info", `[EVIDENCE] 证据: ${ev.summary || ev.route || ""} (score=${ev.score || "?"})`);
     } else if (ev.event === "ctf_helper_triggered") {
-      ctfAppendLog("info", `⚡ 辅助工具: ${ev.helper} @ ${(ev.url || "").slice(0, 60)}`);
+      ctfAppendLog("info", `[HELPER] 辅助工具: ${ev.helper} @ ${(ev.url || "").slice(0, 60)}`);
     } else if (ev.event === "ctf_fuse_triggered") {
-      ctfAppendLog("info", `⚠️ 熔断: ${ev.level} — ${(ev.reason || "").slice(0, 80)}`);
+      ctfAppendLog("info", `[FUSE] 熔断: ${ev.level} — ${(ev.reason || "").slice(0, 80)}`);
     } else if (ev.event === "ctf_phase_transition") {
       const phaseNames = { phase1: "状态机探测", phase2: "并行AI攻击", phase3: "深度推理" };
-      ctfAppendLog("info", `🔄 阶段切换: ${phaseNames[ev.to_phase] || ev.to_phase} — ${ev.reason || ""}`);
+      ctfAppendLog("info", `[PHASE] 阶段切换: ${phaseNames[ev.to_phase] || ev.to_phase} — ${ev.reason || ""}`);
       document.getElementById("ctf-progress-text").textContent = `${phaseNames[ev.to_phase] || ev.to_phase}`;
     } else if (ev.event === "ctf_scan_result") {
-      ctfAppendLog("info", `🔎 并行扫描完成: ${ev.routes_scanned || 0} 路线, ${ev.above_threshold || 0} 可行`);
+      ctfAppendLog("info", `[SCAN] 并行扫描完成: ${ev.routes_scanned || 0} 路线, ${ev.above_threshold || 0} 可行`);
       if (ev.top_routes) {
         ev.top_routes.forEach(r => {
-          ctfAppendLog("info", `   📊 ${r.route}: score=${r.score}`);
+          ctfAppendLog("info", `   [ROUTE] ${r.route}: score=${r.score}`);
+        });
+      }
+      if (ev.worker_summaries) {
+        ev.worker_summaries.forEach((worker) => {
+          upsertWorkerCard(worker.worker_id, {
+            route: worker.route || "unknown",
+            variant: worker.variant || "default",
+            status: worker.success ? "success" : (worker.cancelled ? "cancelled" : (worker.error ? "error" : "done")),
+            turns: worker.turns_completed || 0,
+            api_calls: worker.api_calls || 0,
+            tokens_used: worker.tokens_used || 0,
+            cancelled: !!worker.cancelled,
+            success: !!worker.success,
+            error: worker.error || "",
+          });
         });
       }
     } else if (ev.event === "ctf_worker_assigned") {
-      ctfAppendLog("info", `👷 Worker ${ev.worker_id}: ${ev.route}${ev.variant !== "default" ? " (" + ev.variant + ")" : ""}`);
+      upsertWorkerCard(ev.worker_id, {
+        route: ev.route || "unknown",
+        variant: ev.variant || "default",
+        status: "assigned",
+        turns: 0,
+        api_calls: 0,
+        tokens_used: 0,
+        cancelled: false,
+        success: false,
+      });
+      ctfAppendLog("info", `[WORKER] Worker ${ev.worker_id}: ${ev.route}${ev.variant !== "default" ? " (" + ev.variant + ")" : ""}`);
+    } else if (ev.event === "ctf_worker_summary") {
+      upsertWorkerCard(ev.worker_id, {
+        route: ev.route || "unknown",
+        variant: ev.variant || "default",
+        status: ev.success ? "success" : (ev.cancelled ? "cancelled" : (ev.error ? "error" : "done")),
+        turns: ev.turns_completed || 0,
+        api_calls: ev.api_calls || 0,
+        tokens_used: ev.tokens_used || 0,
+        cancelled: !!ev.cancelled,
+        success: !!ev.success,
+        error: ev.error || "",
+      });
+      ctfAppendLog("info", `[SUMMARY] Worker ${ev.worker_id}: route=${ev.route}, variant=${ev.variant}, turns=${ev.turns_completed}, api_calls=${ev.api_calls}, tokens=${ev.tokens_used}, cancelled=${ev.cancelled}${ev.error ? ", error=" + ev.error : ""}`);
     } else if (ev.event === "ctf_tool_unlocked") {
-      ctfAppendLog("info", `🔓 动态解锁: ${ev.tool} (Worker ${ev.worker_id})`);
+      ctfAppendLog("info", `[UNLOCK] 动态解锁: ${ev.tool} (Worker ${ev.worker_id})`);
     } else if (ev.event === "ctf_knowledge_match") {
-      ctfAppendLog("info", `💡 历史经验匹配: ${ev.route} — ${ev.scenario || ""}`);
+      ctfAppendLog("info", `[KNOWLEDGE] 历史经验匹配: ${ev.route} — ${ev.scenario || ""}`);
+    } else if (ev.event === "ctf_experience_write") {
+      ctfAppendLog("info", `[KB] 经验写入：${ev.success ? "成功解题" : "失败记录"} (${ev.solving_phase})`);
     } else if (ev.event === "ctf_flag_candidate") {
-      ctfAppendLog("success", `🏁 发现 Flag 候选: ${ev.flag}`);
+      ctfAppendLog("success", `[CANDIDATE] 发现 Flag 候选: ${ev.flag}`);
     } else if (ev.event === "ctf_done") {
       return ev;
     } else if (ev.event === "ctf_complete") {
       return ev.result;
     } else if (ev.event === "ctf_error") {
-      ctfAppendLog("error", `❌ ${ev.error || "CTF 解题出错"}`);
+      ctfAppendLog("error", `[ERROR] ${ev.error || "CTF 解题出错"}`);
       return { success: false, error: ev.error, steps: [] };
     }
     return null;

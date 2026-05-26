@@ -12,10 +12,10 @@
 <body>
   <header class="topbar">
     <div class="brand">
-      <div class="logo">⚡</div>
+      <div class="logo">&gt;_</div>
       <div>
         <h1>AutoPenX</h1>
-        <p>LLM 驱动 · 多 Agent 协同 · 智能渗透测试</p>
+        <p>自动化渗透测试控制台 / Autonomous Penetration Testing Console</p>
       </div>
     </div>
     <div class="topbar-right">
@@ -51,7 +51,7 @@
     <!-- ─── 1. Config (Collapsible) ─── -->
     <section class="card">
       <div class="card-header" id="config-toggle" onclick="toggleCard('config')">
-        <h2><span class="icon" style="background:rgba(59,130,246,0.15);color:var(--accent)">⚙</span> LLM 配置与外部工具 <span id="config-summary"></span></h2>
+        <h2><span class="icon" style="background:var(--bg-elevated);color:var(--accent-light);border:1px solid var(--border);font-family:'JetBrains Mono',monospace;font-size:9px">SYS</span> LLM 配置与外部工具 <span id="config-summary"></span></h2>
         <span class="chevron" id="config-chevron">▼</span>
       </div>
       <!-- 不要写内联 display:none，否则会盖住 .card-body.open，导致折叠永不可见 -->
@@ -103,7 +103,7 @@
     <!-- ─── 2. Scan Launch ─── -->
     <section class="card">
       <div class="card-header open" id="scan-toggle" onclick="toggleCard('scan')">
-        <h2><span class="icon" style="background:rgba(168,85,247,0.15);color:var(--purple)">🎯</span> 启动扫描</h2>
+        <h2><span class="icon" style="background:var(--bg-elevated);color:var(--purple);border:1px solid var(--border);font-family:'JetBrains Mono',monospace;font-size:9px">TGT</span> 启动扫描</h2>
         <span class="chevron" id="scan-chevron" style="transform:rotate(180deg)">▼</span>
       </div>
       <div class="card-body open" id="scan-body">
@@ -112,7 +112,7 @@
             <span class="label">目标 URL / 主机</span>
             <div style="display:flex;gap:8px;align-items:center">
               <input type="text" id="target" placeholder="http://testphp.vulnweb.com" required style="flex:1" />
-              <button type="button" id="scan-browser-login-btn" class="btn btn-secondary" onclick="window.browserLogin('scan')">🌐 浏览器登录</button>
+              <button type="button" id="scan-browser-login-btn" class="btn btn-secondary" onclick="window.browserLogin('scan')">同步浏览器会话 (Browser Sync)</button>
             </div>
           </div>
           <div class="form-grid">
@@ -143,7 +143,7 @@
             <div id="approval-status" class="inline-note" style="margin-top:8px">将按低权限策略执行</div>
           </div>
           <div class="actions">
-            <button type="submit" class="btn btn-scan">▶ 开始扫描</button>
+            <button type="submit" class="btn btn-scan">执行扫描 / Start Scan</button>
           </div>
           <div class="warn-banner">⚠️ 仅限对授权目标测试，使用即表示已获得合法授权。</div>
         </form>
@@ -153,13 +153,13 @@
     <!-- ─── 3. CTF 模式 ─── -->
     <section class="card">
       <div class="card-header open" id="ctf-toggle" onclick="toggleCard('ctf')">
-        <h2><span class="icon" style="background:rgba(34,197,94,0.15);color:var(--green)">🏁</span> CTF 模式</h2>
+        <h2><span class="icon" style="background:var(--bg-elevated);color:var(--green);border:1px solid var(--border);font-family:'JetBrains Mono',monospace;font-size:9px">CTF</span> CTF 模式</h2>
         <span class="chevron" id="ctf-chevron" style="transform:rotate(180deg)">▼</span>
       </div>
       <div class="card-body open" id="ctf-body">
         <!-- File Upload -->
         <div class="subsection">
-          <h3>📁 题目文件上传</h3>
+          <h3>题目文件上传 / Upload File</h3>
           <div id="ctf-dropzone" class="ctf-dropzone">
             <p>拖拽文件到此处，或 <label for="ctf-file-input" class="ctf-upload-link">点击选择文件</label></p>
             <p class="ctf-dropzone-hint">支持 .py, .c, .zip, .pcap, .png, .elf, .pdf 等</p>
@@ -170,7 +170,7 @@
 
         <!-- Tool Selection -->
         <div class="subsection">
-          <h3>🔧 工具选择</h3>
+          <h3>工具选择 / Select Specialist Tools</h3>
           <div id="ctf-tools-panel" class="ctf-tools-panel">
             <span class="inline-note">加载中…</span>
           </div>
@@ -178,13 +178,13 @@
 
         <!-- Configuration -->
         <div class="subsection">
-          <h3>⚙ 配置</h3>
+          <h3>配置 / Config Solver</h3>
           <div class="form-grid">
             <div class="form-group">
               <span class="label">目标地址</span>
               <div style="display:flex;gap:8px;align-items:center">
                 <input type="text" id="ctf-target" placeholder="http://challenge.ctf.com 或 nc host port" style="flex:1" />
-                <button type="button" id="ctf-browser-login-btn" class="btn btn-secondary" onclick="window.browserLogin('ctf')">🌐 浏览器登录</button>
+                <button type="button" id="ctf-browser-login-btn" class="btn btn-secondary" onclick="window.browserLogin('ctf')">同步浏览器会话 (Browser Sync)</button>
               </div>
             </div>
             <div class="form-group">
@@ -211,34 +211,34 @@
               <input type="text" id="ctf-flag-format" placeholder="flag{...}" value="flag{...}" />
             </div>
             <div class="form-group">
-              <span class="label">最大尝试次数: <strong id="ctf-attempts-val">10</strong></span>
-              <input type="range" id="ctf-max-attempts" min="1" max="30" value="10" oninput="document.getElementById('ctf-attempts-val').textContent=this.value" />
+              <span class="label">最大尝试次数: <strong id="ctf-attempts-val">30</strong></span>
+              <input type="range" id="ctf-max-attempts" min="1" max="80" value="30" oninput="document.getElementById('ctf-attempts-val').textContent=this.value" />
             </div>
             <div class="form-group">
-              <span class="label">超时时间: <strong id="ctf-timeout-val">600</strong>s</span>
-              <input type="range" id="ctf-timeout" min="60" max="1800" step="30" value="600" oninput="document.getElementById('ctf-timeout-val').textContent=this.value" />
+              <span class="label">超时时间: <strong id="ctf-timeout-val">1200</strong>s</span>
+              <input type="range" id="ctf-timeout" min="60" max="3600" step="60" value="1200" oninput="document.getElementById('ctf-timeout-val').textContent=this.value" />
             </div>
           </div>
           <label class="checkbox-row"><input type="checkbox" id="ctf-thinking-mode" checked /> 启用 Thinking 模式（深度推理）</label>
-          <label class="checkbox-row"><input type="checkbox" id="ctf-multi-agent" checked /> 启用多智能体协作（状态机 + 并行 Worker）</label>
+          <label class="checkbox-row"><input type="checkbox" id="ctf-multi-agent" checked /> 启用强自主解题（CTFSolvePipeline + 并行 AI Worker）</label>
         </div>
 
         <!-- Solve Button -->
         <div class="actions">
-          <button type="button" id="ctf-solve-btn" class="btn btn-scan" onclick="window.startCTFSolve()">🏁 开始解题</button>
+          <button type="button" id="ctf-solve-btn" class="btn btn-scan" onclick="window.startCTFSolve()">执行解题 / Start Solve</button>
         </div>
 
         <!-- Results Area -->
         <div id="ctf-results" class="ctf-results" hidden>
           <div class="subsection">
-            <h3>📊 解题结果</h3>
+            <h3>解题结果</h3>
             <div id="ctf-progress-indicator" class="ctf-progress-indicator">
               <div class="ctf-progress-bar"><div id="ctf-progress-fill" class="ctf-progress-fill"></div></div>
               <span id="ctf-progress-text">等待开始…</span>
             </div>
             <div id="ctf-flag-result" class="ctf-flag-result" hidden></div>
             <details id="ctf-thinking-section" class="ctf-thinking-section">
-              <summary>💭 推理过程</summary>
+              <summary>推理过程</summary>
               <pre id="ctf-thinking-content"></pre>
             </details>
             <div id="ctf-solve-log" class="ctf-solve-log"></div>
@@ -249,8 +249,11 @@
 
     <!-- ─── 4. Live Progress ─── -->
     <section class="card" id="progress-card" hidden>
-      <h2 style="padding:16px 22px 0;margin:0">实时进度 <span id="job-meta"></span></h2>
-      <div style="padding:0 22px 22px">
+      <h2 style="padding:12px 18px 0;margin:0;font-size:13px;font-weight:600;display:flex;align-items:center;gap:8px">
+        <span class="icon" style="background:var(--bg-elevated);color:var(--accent-light);border:1px solid var(--border);width:24px;height:24px;display:grid;place-items:center;border-radius:var(--radius-sm);font-size:10px;font-family:'JetBrains Mono',monospace">LIVE</span>
+        实时执行状态 <span id="job-meta" style="font-size:11px;color:var(--text-muted);font-weight:400"></span>
+      </h2>
+      <div style="padding:0 18px 18px">
         <div class="state-bar" style="margin-top:14px">
           <span data-state="RECON">RECON</span>
           <span data-state="SCAN">SCAN</span>
@@ -275,13 +278,21 @@
             <div id="phase-tasks" class="task-list"><div class="kv-empty">等待规划…</div></div>
           </div>
           <div class="subpanel">
+            <h3>3-Worker 详情</h3>
+            <div id="worker-summary-grid" class="worker-summary-grid">
+              <div class="kv-empty">等待 worker 分配…</div>
+            </div>
+          </div>
+        </div>
+        <div class="telemetry-grid">
+          <div class="subpanel">
             <h3>证据产物</h3>
             <div id="artifact-list" class="artifact-list"><div class="kv-empty">尚无产物</div></div>
           </div>
-        </div>
-        <div class="subpanel llm-panel">
-          <h3>LLM 对话</h3>
-          <div id="llm-chat" class="llm-chat-log"><div class="kv-empty">等待 LLM 响应…</div></div>
+          <div class="subpanel llm-panel">
+            <h3>LLM 对话</h3>
+            <div id="llm-chat" class="llm-chat-log"><div class="kv-empty">等待 LLM 响应…</div></div>
+          </div>
         </div>
         <pre id="log"></pre>
       </div>
@@ -289,8 +300,11 @@
 
     <!-- ─── 5. Findings ─── -->
     <section class="card" id="findings-card" hidden>
-      <h2 style="padding:16px 22px 0;margin:0">漏洞发现</h2>
-      <div style="padding:0 22px 22px;overflow-x:auto">
+      <h2 style="padding:12px 18px 0;margin:0;font-size:13px;font-weight:600;display:flex;align-items:center;gap:8px">
+        <span class="icon" style="background:var(--bg-elevated);color:var(--red);border:1px solid var(--border);width:24px;height:24px;display:grid;place-items:center;border-radius:var(--radius-sm);font-size:10px;font-family:'JetBrains Mono',monospace">FIND</span>
+        漏洞分析发现
+      </h2>
+      <div style="padding:0 18px 18px;overflow-x:auto">
         <table id="findings-table">
           <thead>
             <tr><th>#</th><th>严重度</th><th>状态</th><th>类型</th><th>URL</th><th>参数</th></tr>
@@ -302,8 +316,11 @@
 
     <!-- ─── 6. Report ─── -->
     <section class="card" id="report-card" hidden>
-      <h2 style="padding:16px 22px 0;margin:0">完整报告</h2>
-      <div style="padding:0 22px 22px">
+      <h2 style="padding:12px 18px 0;margin:0;font-size:13px;font-weight:600;display:flex;align-items:center;gap:8px">
+        <span class="icon" style="background:var(--bg-elevated);color:var(--green);border:1px solid var(--border);width:24px;height:24px;display:grid;place-items:center;border-radius:var(--radius-sm);font-size:10px;font-family:'JetBrains Mono',monospace">REPT</span>
+        审计报告预览
+      </h2>
+      <div style="padding:0 18px 18px">
         <div id="report-actions">
           <a id="md-link" href="#" target="_blank">📄 Markdown</a>
           <a id="html-link" href="#" target="_blank">🌐 HTML</a>

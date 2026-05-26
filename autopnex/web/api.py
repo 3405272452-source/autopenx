@@ -9,6 +9,7 @@ import shutil
 import threading
 import time
 import uuid
+import zipfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -294,6 +295,48 @@ async def job_report_html(job_id: str):
 UPLOAD_BASE = Path(__file__).parent.parent.parent / "uploads"
 
 
+def _summarize_ctf_file(fpath: str) -> str:
+    path = Path(fpath)
+    if not path.exists():
+        return f"[文件不存在: {fpath}]"
+    parts = [f"[文件: {path.name} ({path.stat().st_size} bytes)]"]
+    source_ext = {".php", ".py", ".js", ".html", ".htm", ".java", ".rb", ".go", ".c", ".cpp", ".h"}
+    text_ext = {".txt", ".md", ".yml", ".yaml", ".json", ".xml", ".conf", ".ini", ".env"}
+    suffix = path.suffix.lower()
+    if suffix in source_ext | text_ext:
+        try:
+            content = path.read_text(encoding="utf-8", errors="replace")
+            parts.append(content[:8000])
+            if len(content) > 8000:
+                parts.append(f"... (truncated, total {len(content)} chars)")
+        except Exception as exc:
+            parts.append(f"[读取失败: {exc}]")
+    elif suffix == ".zip":
+        try:
+            with zipfile.ZipFile(path, "r") as zf:
+                names = zf.namelist()
+                parts.append(f"ZIP 内容 ({len(names)} files):")
+                parts.extend(f"- {name}" for name in names[:30])
+                read_count = 0
+                for name in names:
+                    ext = Path(name).suffix.lower()
+                    if ext in source_ext | text_ext and read_count < 5:
+                        try:
+                            content = zf.read(name).decode("utf-8", errors="replace")
+                        except Exception:
+                            continue
+                        parts.append(f"\n--- {name} ---")
+                        parts.append(content[:4000])
+                        if len(content) > 4000:
+                            parts.append(f"... (truncated, total {len(content)} chars)")
+                        read_count += 1
+        except Exception as exc:
+            parts.append(f"[ZIP 分析失败: {exc}]")
+    else:
+        parts.append(f"[二进制/未知类型: {suffix or 'no suffix'}]")
+    return "\n".join(parts)
+
+
 def _inject_challenge_context(agent, hint: Optional[str], title: Optional[str]) -> None:
     """Inject challenge hint/title into the agent's blackboard as challenge_context."""
     parts = []
@@ -309,6 +352,164 @@ def _inject_challenge_context(agent, hint: Optional[str], title: Optional[str]) 
     else:
         # Fallback: store on agent itself for prompt_compiler to pick up
         agent._challenge_context = context_str
+
+
+def _build_ctf_challenge_context(req: "CTFSolveRequest") -> str:
+    parts = []
+    if req.title:
+        parts.append(f"题目名称: {req.title}")
+    if req.hint:
+        parts.append(f"题目提示: {req.hint}")
+    if req.challenge_type:
+        parts.append(f"题目类型: {req.challenge_type}")
+    if req.files:
+        parts.append("题目文件:")
+        for fpath in req.files[:10]:
+            parts.append(_summarize_ctf_file(fpath))
+    return "\n".join(parts)
+
+
+def _build_autonomous_pipeline_config(req: "CTFSolveRequest"):
+    from ..ctf.solve_pipeline import PipelineConfig
+
+    timeout = max(int(req.timeout or 1200), 60)
+    max_turns = max(int(req.max_attempts or 30), 30)
+    return PipelineConfig(
+        # Keep Phase 1 extremely short so we reach AI racing quickly.
+        phase1_max_rounds=1,
+        stall_window=1,
+        phase2_worker_count=3,
+        phase2_max_turns_per_worker=max_turns,
+        phase2_wall_clock_timeout_seconds=float(timeout),
+        max_tokens_per_worker=1000000,
+        phase3_max_iterations=max_turns,
+        phase3_wall_clock_timeout_seconds=float(max(60, int(timeout * 0.75))),
+        # In aggressive mode, spend freely and let the solver explore.
+        max_api_calls_per_challenge=max(500, max_turns * 12),
+        phase1_mode="hybrid",
+        parallel_scan_timeout=8.0,
+        parallel_scan_max_requests=40,
+        phase2_dynamic_workers=True,
+        phase2_top_route_dual_worker=True,
+        experience_write_enabled=True,
+        knowledge_path=str(Path(__file__).parent.parent.parent / "ctf_knowledge.json"),
+        fast_track_direct_solve=True,
+        fast_track_token_budget=64000,
+        fast_track_max_turns=max_turns,
+    )
+
+
+def _pipeline_result_payload(result) -> Dict[str, Any]:
+    return {
+        "success": result.success,
+        "flag": result.flag,
+        "reasoning": "",
+        "steps": [],
+        "iterations": result.phase2_turns or result.phase3_iterations or result.phase1_rounds,
+        "duration_ms": int(result.duration_ms),
+        "error": result.error,
+        "solving_phase": result.solving_phase,
+        "phase1_rounds": result.phase1_rounds,
+        "phase2_turns": result.phase2_turns,
+        "phase3_iterations": result.phase3_iterations,
+        "upgrade_events": result.upgrade_events,
+        "phase1_scan_results": result.phase1_scan_results,
+        "attribution": result.attribution.to_dict() if result.attribution else None,
+    }
+
+
+async def _run_autonomous_ctf_pipeline(
+    req: "CTFSolveRequest",
+    runtime,
+    push: Optional[Any] = None,
+) -> Dict[str, Any]:
+    from ..ctf.flag_engine import FlagEngine
+    from ..ctf.solve_pipeline import CTFSolvePipeline
+    from ..ctf.web_state_blackboard import WebStateBlackboard
+
+    config = _build_autonomous_pipeline_config(req)
+    flag_format = req.flag_format or r"flag\{[^}]+\}"
+    blackboard = WebStateBlackboard(
+        target_url=req.target,
+        challenge_type=req.challenge_type or "web",
+        flag_format=flag_format,
+    )
+    challenge_context = _build_ctf_challenge_context(req)
+    if challenge_context:
+        blackboard.challenge_context = challenge_context
+    pipeline = CTFSolvePipeline(
+        config=config,
+        target=req.target,
+        blackboard=blackboard,
+        flag_engine=FlagEngine(flag_formats=[flag_format]),
+        runtime_config=runtime,
+    )
+    if push:
+        push({
+            "event": "ctf_start",
+            "target": req.target,
+            "challenge_type": req.challenge_type,
+            "enabled_tools": req.enabled_tools,
+            "autonomous_pipeline": True,
+        })
+        push({
+            "event": "ctf_phase_transition",
+            "to_phase": "phase0",
+            "reason": "知识匹配 + 目标指纹采集",
+        })
+        push({
+            "event": "ctf_phase_transition",
+            "to_phase": "phase1",
+            "reason": "强自主流水线：快速路线扫描 + 并行 AI Worker",
+        })
+    result = await pipeline.run()
+    payload = _pipeline_result_payload(result)
+    if push:
+        if getattr(pipeline, "phase0_match", None):
+            match = pipeline.phase0_match or {}
+            push({
+                "event": "ctf_knowledge_match",
+                "route": match.get("route", "unknown"),
+                "scenario": match.get("scenario", "unknown"),
+                "score": match.get("score", None),
+            })
+        if result.phase1_scan_results:
+            push({
+                "event": "ctf_scan_result",
+                "routes_scanned": result.phase1_scan_results.get("routes_scanned", 0),
+                "above_threshold": result.phase1_scan_results.get("routes_above_threshold", 0),
+                "knowledge_matches": result.phase1_scan_results.get("knowledge_matches", []),
+                "total_requests": result.phase1_scan_results.get("total_requests", 0),
+                "total_duration_ms": result.phase1_scan_results.get("total_duration_ms", 0),
+            })
+        attribution = payload.get("attribution") or {}
+        if attribution:
+            push({
+                "event": "ctf_worker_assigned",
+                "worker_id": attribution.get("worker_id", "unknown"),
+                "route": attribution.get("strategy_hint", attribution.get("route", "unknown")),
+                "variant": attribution.get("variant", "default"),
+            })
+        for summary in result.get("phase2_worker_summaries", []):
+            push({
+                "event": "ctf_worker_summary",
+                "worker_id": summary.get("worker_id", "unknown"),
+                "route": summary.get("route", "unknown"),
+                "variant": summary.get("variant", "default"),
+                "success": summary.get("success", False),
+                "turns_completed": summary.get("turns_completed", 0),
+                "api_calls": summary.get("api_calls", 0),
+                "tokens_used": summary.get("tokens_used", 0),
+                "cancelled": summary.get("cancelled", False),
+                "error": summary.get("error", ""),
+            })
+        push({
+            "event": "ctf_experience_write",
+            "success": result.success,
+            "solving_phase": result.solving_phase,
+        })
+        push({"event": "ctf_done", **payload})
+    return payload
 
 # Magic bytes signatures for file type detection
 _MAGIC_SIGNATURES: List[tuple] = [
@@ -492,8 +693,6 @@ async def ctf_solve(req: CTFSolveRequest):
         raise HTTPException(400, "target is required")
 
     try:
-        from ..ctf.react_agent import CTFReActAgent
-
         base_runtime = settings.snapshot()
         runtime = apply_scan_policy(
             base_runtime,
@@ -505,6 +704,11 @@ async def ctf_solve(req: CTFSolveRequest):
             approval_token=req.approval_token,
         )
         ensure_target_allowed(req.target, runtime_config=runtime)
+
+        if req.multi_agent:
+            return await _run_autonomous_ctf_pipeline(req, runtime)
+
+        from ..ctf.react_agent import CTFReActAgent
 
         agent = CTFReActAgent(
             target=req.target,
@@ -569,8 +773,6 @@ async def ctf_solve_events(req: CTFSolveRequest):
 
     def worker() -> None:
         try:
-            from ..ctf.react_agent import CTFReActAgent
-
             base_runtime = settings.snapshot()
             runtime = apply_scan_policy(
                 base_runtime,
@@ -582,6 +784,13 @@ async def ctf_solve_events(req: CTFSolveRequest):
                 approval_token=req.approval_token,
             )
             ensure_target_allowed(req.target, runtime_config=runtime)
+            if req.multi_agent:
+                result = asyncio.run(_run_autonomous_ctf_pipeline(req, runtime, push))
+                push({"event": "ctf_complete", "result": result})
+                return
+
+            from ..ctf.react_agent import CTFReActAgent
+
             agent = CTFReActAgent(
                 target=req.target,
                 challenge_type=req.challenge_type,
