@@ -33,6 +33,53 @@
     approvalToken: null,
   };
 
+  // ─── Toast Notifications (defined early for use throughout) ─────────────────
+  function showToast(type, message, duration) {
+    duration = duration || 3000;
+    const container = document.getElementById("toast-container");
+    if (!container) return;
+    const toast = document.createElement("div");
+    toast.className = `toast toast-${type}`;
+    const icons = { success: "✓", error: "✗", info: "ℹ" };
+    toast.textContent = `${icons[type] || ""} ${message}`;
+    container.appendChild(toast);
+    setTimeout(() => {
+      toast.style.animation = "toastOut 0.3s ease-out forwards";
+      setTimeout(() => toast.remove(), 300);
+    }, duration);
+  }
+  window.showToast = showToast;
+
+  // ─── Stats Counter (defined early for use throughout) ──────────────────────
+  const statsData = JSON.parse(localStorage.getItem("autopenx-stats") || '{"scans":0,"ctfSolved":0,"findings":0,"startTime":0}');
+  if (!statsData.startTime) statsData.startTime = Date.now();
+
+  function updateStatsUI() {
+    const statScans = document.getElementById("stat-scans");
+    const statCtf = document.getElementById("stat-ctf-solved");
+    const statFindings = document.getElementById("stat-findings");
+    const statUptime = document.getElementById("stat-uptime");
+    if (statScans) statScans.textContent = statsData.scans;
+    if (statCtf) statCtf.textContent = statsData.ctfSolved;
+    if (statFindings) statFindings.textContent = statsData.findings;
+    if (statUptime) {
+      const elapsed = Math.floor((Date.now() - statsData.startTime) / 1000);
+      if (elapsed < 60) statUptime.textContent = elapsed + "s";
+      else if (elapsed < 3600) statUptime.textContent = Math.floor(elapsed / 60) + "m";
+      else statUptime.textContent = Math.floor(elapsed / 3600) + "h";
+    }
+  }
+
+  function incrementStat(key, amount) {
+    amount = amount || 1;
+    statsData[key] = (statsData[key] || 0) + amount;
+    localStorage.setItem("autopenx-stats", JSON.stringify(statsData));
+    updateStatsUI();
+  }
+
+  updateStatsUI();
+  setInterval(updateStatsUI, 10000);
+
   window.toggleCard = function (id) {
     const body = el(id + "-body");
     const header = el(id + "-toggle");
@@ -138,6 +185,7 @@
       state.settings = data;
       settingsStatusEl.className = "inline-note ok";
       settingsStatusEl.textContent = "配置已保存，并已刷新运行时设置。";
+      showToast("success", "配置已保存");
       el("scan-external-tools").checked = !!data.allow_external_tools;
       renderCapabilities(data.capabilities || []);
       await loadHealth();
@@ -165,7 +213,9 @@
 
     submitBtn.disabled = true;
     submitBtn.textContent = "扫描中…";
+    submitBtn.classList.add("running");
     resetUI();
+    showToast("info", "正在启动扫描…");
 
     try {
       const approvalToken = await ensureApprovalToken(payload);
@@ -180,6 +230,7 @@
       state.jobId = data.job_id;
       progressCard.hidden = false;
       jobMeta.textContent = `job=${data.job_id} target=${payload.target}`;
+      incrementStat("scans");
       renderTelemetry({
         target: payload.target,
         mode: payload.mock ? "mock" : "llm",
@@ -196,6 +247,8 @@
       approvalStatusEl.className = "inline-note err";
       submitBtn.disabled = false;
       submitBtn.textContent = "开始扫描";
+      submitBtn.classList.remove("running");
+      showToast("error", "扫描启动失败");
     }
   }
 
@@ -365,6 +418,7 @@
         new_findings: (ev.new_findings || []).length,
       });
       appendLog("ok", `  新增结果 ${String((ev.new_findings || []).length)} 条`);
+      incrementStat("findings", (ev.new_findings || []).length);
       return;
     }
     if (kind === "finding_confirmed" || kind === "finding_status_changed") {
@@ -402,6 +456,8 @@
         if (s.dataset.state === "DONE") s.classList.add("done", "active");
       });
       appendLog("ok", "\n✔ 扫描完成");
+      submitBtn.classList.remove("running");
+      showToast("success", "扫描完成！");
       return;
     }
     if (kind === "job_done") {
@@ -948,6 +1004,8 @@
         flagResult.textContent = "🎉 Flag: " + data.flag;
         document.getElementById("ctf-progress-text").textContent = "解题成功!";
         ctfAppendLog("success", "成功! Flag: " + data.flag);
+        incrementStat("ctfSolved");
+        showToast("success", "CTF 解题成功！");
       } else {
         flagResult.hidden = false;
         flagResult.className = "ctf-flag-result failure";
@@ -1026,36 +1084,66 @@
 
   function handleCTFStreamEvent(ev) {
     if (ev.event === "ctf_start") {
-      ctfAppendLog("info", `启动 CTF Agent，工具: ${(ev.enabled_tools || []).join(", ")}`);
-      document.getElementById("ctf-progress-fill").style.width = "25%";
-      document.getElementById("ctf-progress-text").textContent = "已启动，正在读取附件与目标页面…";
+      ctfAppendLog("info", `🚀 启动 CTF Agent，工具: ${(ev.enabled_tools || []).join(", ")}`);
+      document.getElementById("ctf-progress-fill").style.width = "10%";
+      document.getElementById("ctf-progress-text").textContent = "已启动，正在分析目标…";
     } else if (ev.event === "ctf_iteration_start") {
-      ctfAppendLog("info", `第 ${ev.iteration}/${ev.max_iterations} 轮推理`);
-      const pct = Math.min(90, 25 + Math.round((ev.iteration / Math.max(ev.max_iterations || 1, 1)) * 60));
+      const phase = ev.phase || "";
+      const phaseLabel = phase === "deterministic" ? "🔧 状态机探测" : "🧠 AI 推理";
+      ctfAppendLog("info", `${phaseLabel} 第 ${ev.iteration}/${ev.max_iterations} 轮`);
+      const pct = Math.min(90, 15 + Math.round((ev.iteration / Math.max(ev.max_iterations || 1, 1)) * 70));
       document.getElementById("ctf-progress-fill").style.width = pct + "%";
-      document.getElementById("ctf-progress-text").textContent = `推理中：第 ${ev.iteration} 轮`;
+      document.getElementById("ctf-progress-text").textContent = `${phaseLabel}：第 ${ev.iteration} 轮`;
     } else if (ev.event === "ctf_llm_response") {
       if (ev.reasoning_content) {
         const thinking = document.getElementById("ctf-thinking-content");
         thinking.textContent += `\n\n[第 ${ev.iteration} 轮思考摘要]\n${ev.reasoning_content}`;
         thinking.scrollTop = thinking.scrollHeight;
+        document.getElementById("ctf-thinking-section").removeAttribute("hidden");
       }
       if (ev.content) {
-        ctfAppendLog("info", `[第 ${ev.iteration} 轮分析] ${ev.content.slice(0, 500)}`);
+        ctfAppendLog("info", `💭 [第 ${ev.iteration} 轮分析] ${ev.content.slice(0, 400)}`);
       }
       (ev.tool_calls || []).forEach((call) => {
-        ctfAppendLog("info", `计划调用: ${call.name}(${String(call.arguments || "").slice(0, 200)})`);
+        ctfAppendLog("info", `📋 计划调用: ${call.name}(${String(call.arguments || "").slice(0, 150)})`);
       });
     } else if (ev.event === "ctf_tool_start") {
-      ctfAppendLog("info", `执行工具: ${ev.tool} ${JSON.stringify(ev.arguments || {}).slice(0, 240)}`);
+      ctfAppendLog("info", `🔧 执行: ${ev.tool}(${JSON.stringify(ev.arguments || {}).slice(0, 200)})`);
     } else if (ev.event === "ctf_tool_finish") {
-      ctfAppendLog("info", `工具返回: ${ev.tool} → ${String(ev.result_preview || "").slice(0, 500)}`);
+      const preview = String(ev.result_preview || "").slice(0, 400);
+      const hasFlag = preview.toLowerCase().includes("flag{");
+      ctfAppendLog(hasFlag ? "success" : "info", `${hasFlag ? "🎯" : "📄"} ${ev.tool} → ${preview}`);
+    } else if (ev.event === "ctf_evidence_card") {
+      ctfAppendLog("info", `📊 证据: ${ev.summary || ev.route || ""} (score=${ev.score || "?"})`);
+    } else if (ev.event === "ctf_helper_triggered") {
+      ctfAppendLog("info", `⚡ 辅助工具: ${ev.helper} @ ${(ev.url || "").slice(0, 60)}`);
+    } else if (ev.event === "ctf_fuse_triggered") {
+      ctfAppendLog("info", `⚠️ 熔断: ${ev.level} — ${(ev.reason || "").slice(0, 80)}`);
+    } else if (ev.event === "ctf_phase_transition") {
+      const phaseNames = { phase1: "状态机探测", phase2: "并行AI攻击", phase3: "深度推理" };
+      ctfAppendLog("info", `🔄 阶段切换: ${phaseNames[ev.to_phase] || ev.to_phase} — ${ev.reason || ""}`);
+      document.getElementById("ctf-progress-text").textContent = `${phaseNames[ev.to_phase] || ev.to_phase}`;
+    } else if (ev.event === "ctf_scan_result") {
+      ctfAppendLog("info", `🔎 并行扫描完成: ${ev.routes_scanned || 0} 路线, ${ev.above_threshold || 0} 可行`);
+      if (ev.top_routes) {
+        ev.top_routes.forEach(r => {
+          ctfAppendLog("info", `   📊 ${r.route}: score=${r.score}`);
+        });
+      }
+    } else if (ev.event === "ctf_worker_assigned") {
+      ctfAppendLog("info", `👷 Worker ${ev.worker_id}: ${ev.route}${ev.variant !== "default" ? " (" + ev.variant + ")" : ""}`);
+    } else if (ev.event === "ctf_tool_unlocked") {
+      ctfAppendLog("info", `🔓 动态解锁: ${ev.tool} (Worker ${ev.worker_id})`);
+    } else if (ev.event === "ctf_knowledge_match") {
+      ctfAppendLog("info", `💡 历史经验匹配: ${ev.route} — ${ev.scenario || ""}`);
+    } else if (ev.event === "ctf_flag_candidate") {
+      ctfAppendLog("success", `🏁 发现 Flag 候选: ${ev.flag}`);
     } else if (ev.event === "ctf_done") {
       return ev;
     } else if (ev.event === "ctf_complete") {
       return ev.result;
     } else if (ev.event === "ctf_error") {
-      ctfAppendLog("error", ev.error || "CTF 解题出错");
+      ctfAppendLog("error", `❌ ${ev.error || "CTF 解题出错"}`);
       return { success: false, error: ev.error, steps: [] };
     }
     return null;
@@ -1158,5 +1246,50 @@
   window.getLoginCookies = function () {
     return loginState;
   };
+
+  // ─── Theme Toggle ──────────────────────────────────────────────────────────
+
+  function initTheme() {
+    const saved = localStorage.getItem("autopenx-theme") || "dark";
+    document.documentElement.setAttribute("data-theme", saved);
+    updateThemeIcon(saved);
+  }
+
+  function updateThemeIcon(theme) {
+    const btn = document.getElementById("theme-toggle");
+    if (btn) btn.textContent = theme === "dark" ? "🌙" : "☀️";
+  }
+
+  window.toggleTheme = function () {
+    const current = document.documentElement.getAttribute("data-theme") || "dark";
+    const next = current === "dark" ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", next);
+    localStorage.setItem("autopenx-theme", next);
+    updateThemeIcon(next);
+    showToast("info", `已切换为${next === "dark" ? "深色" : "浅色"}主题`);
+  };
+
+  initTheme();
+
+  // ─── Keyboard Shortcuts ────────────────────────────────────────────────────
+
+  document.addEventListener("keydown", function (e) {
+    // Ctrl+Enter: start scan
+    if (e.ctrlKey && e.key === "Enter") {
+      e.preventDefault();
+      const scanBtn = scanForm.querySelector("button[type='submit']");
+      if (scanBtn && !scanBtn.disabled) scanBtn.click();
+    }
+    // Ctrl+K: focus target input
+    if (e.ctrlKey && e.key === "k") {
+      e.preventDefault();
+      const target = el("target");
+      if (target) target.focus();
+    }
+    // Escape: close any open details
+    if (e.key === "Escape") {
+      document.querySelectorAll("details[open]").forEach((d) => d.removeAttribute("open"));
+    }
+  });
 
 })();

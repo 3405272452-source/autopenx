@@ -18,10 +18,36 @@
         <p>LLM 驱动 · 多 Agent 协同 · 智能渗透测试</p>
       </div>
     </div>
-    <div id="health" class="badge badge-offline">连接中…</div>
+    <div class="topbar-right">
+      <button id="theme-toggle" class="btn-icon" title="切换主题" onclick="window.toggleTheme()">🌙</button>
+      <div id="health" class="badge badge-offline">连接中…</div>
+    </div>
   </header>
 
+  <!-- Toast 通知容器 -->
+  <div id="toast-container" class="toast-container"></div>
+
   <main>
+    <!-- ─── 快捷统计栏 ─── -->
+    <section class="stats-bar" id="stats-bar">
+      <div class="stat-item">
+        <span class="stat-value" id="stat-scans">0</span>
+        <span class="stat-label">扫描次数</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-value" id="stat-ctf-solved">0</span>
+        <span class="stat-label">CTF 已解</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-value" id="stat-findings">0</span>
+        <span class="stat-label">漏洞发现</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-value" id="stat-uptime">--</span>
+        <span class="stat-label">运行时间</span>
+      </div>
+    </section>
+
     <!-- ─── 1. Config (Collapsible) ─── -->
     <section class="card">
       <div class="card-header" id="config-toggle" onclick="toggleCard('config')">
@@ -76,7 +102,7 @@
 
     <!-- ─── 2. Scan Launch ─── -->
     <section class="card">
-      <div class="card-header open" onclick="toggleCard('scan')">
+      <div class="card-header open" id="scan-toggle" onclick="toggleCard('scan')">
         <h2><span class="icon" style="background:rgba(168,85,247,0.15);color:var(--purple)">🎯</span> 启动扫描</h2>
         <span class="chevron" id="scan-chevron" style="transform:rotate(180deg)">▼</span>
       </div>
@@ -277,6 +303,12 @@
       </div>
     </section>
   </main>
+
+  <!-- Footer -->
+  <footer class="app-footer">
+    <span>AutoPenX v1.0 · LLM 驱动全自动渗透测试</span>
+    <span>⌨️ 快捷键: <kbd>Ctrl+Enter</kbd> 开始扫描 · <kbd>Ctrl+K</kbd> 聚焦目标输入</span>
+  </footer>
 
   <script src="/static/app.js?v=4"></script>
 </body>
